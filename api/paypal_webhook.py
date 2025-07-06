@@ -3,32 +3,13 @@ import json
 import logging
 import requests # For direct Telegram API calls
 from urllib.parse import urlparse, parse_qs
-import sys
-
-# Add the parent directory to the Python path to allow imports from the root
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-try:
-    from paypal_integration import execute_paypal_payment
-    from database import update_user_data, get_user_by_paypal_payment_id
-    from constants import PAYMENT_SUCCESS, PAYMENT_FAILED
-except ImportError as e:
-    logger.error(f"Failed to import necessary modules for paypal_webhook: {e}. Simulating functions.")
-    async def execute_paypal_payment(payment_id: str, payer_id: str):
-        logging.info(f"Simulating execute_paypal_payment for {payment_id} with {payer_id}")
-        return True # Simulate success
-    async def update_user_data(user_id, data):
-        logging.info(f"Simulating update_user_data for user {user_id} with {data}")
-        pass
-    async def get_user_by_paypal_payment_id(payment_id: str):
-        logging.info(f"Simulating get_user_by_paypal_payment_id for {payment_id}")
-        return {'user_id': 12345, 'chat_id': 67890} # Simulate a user
-    PAYMENT_SUCCESS = "Payment simulated as successful."
-    PAYMENT_FAILED = "Payment simulated as failed."
+from paypal_integration import execute_paypal_payment
+from database import update_user_data, get_user_by_paypal_payment_id
+from constants import PAYMENT_SUCCESS, PAYMENT_FAILED
 
 async def send_telegram_message(chat_id: int, text: str):
     """Sends a message to a Telegram user using the Bot API."""
