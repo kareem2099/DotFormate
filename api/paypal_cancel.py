@@ -10,7 +10,7 @@ logger.setLevel(logging.INFO)
 from database import update_user_data, get_user_by_paypal_payment_id
 from constants import PAYMENT_PENDING, PAYMENT_FAILED
 
-async def send_telegram_message(chat_id: int, text: str):
+def send_telegram_message(chat_id: int, text: str):
     """Sends a message to a Telegram user using the Bot API."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not bot_token:
@@ -31,7 +31,7 @@ async def send_telegram_message(chat_id: int, text: str):
         logger.error(f"Failed to send Telegram message to {chat_id}: {e}")
         return False
 
-async def handler(request):
+def handler(request):
     """
     Vercel serverless function handler for PayPal cancel URL (browser redirect).
     This function is called when PayPal redirects the user's browser back after cancellation.
@@ -63,7 +63,7 @@ async def handler(request):
         user_id = int(user_id)
 
         # Notify the user about the cancellation
-        await send_telegram_message(user_id, PAYMENT_PENDING + " (Payment cancelled by user.)")
+        send_telegram_message(user_id, PAYMENT_PENDING + " (Payment cancelled by user.)")
         logger.info(f"PayPal payment cancelled notification sent for user {user_id}.")
         
         # Redirect user back to Telegram bot
@@ -79,7 +79,7 @@ async def handler(request):
         logger.error(f"Error processing PayPal cancel: {e}", exc_info=True)
         # Attempt to notify user if user_id is available
         if 'user_id' in locals() and user_id:
-            await send_telegram_message(user_id, PAYMENT_FAILED + f" (Error: {e})")
+            send_telegram_message(user_id, PAYMENT_FAILED + f" (Error: {e})")
         return {
             'statusCode': 500,
             'body': f'Internal Server Error: {e}'
