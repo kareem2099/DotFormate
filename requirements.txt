@@ -1,0 +1,4 @@
+requests
+paypalrestsdk
+pymongo
+python-telegram-bot
