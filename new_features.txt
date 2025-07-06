@@ -1,0 +1,31 @@
+Implemented Features:
+
+1.  **DOCX to PPTX Conversion:**
+    *   **File:** `docx_converter.py`
+    *   **Description:** Added functionality to convert Microsoft Word documents (.docx) to PowerPoint presentations (.pptx) using LibreOffice.
+    *   **Integration:** Updated `menu_handlers.py` to include a callback for this conversion and `main.py` to route to the new handler.
+
+2.  **PPTX to DOCX Conversion:**
+    *   **File:** `pptx_converter.py`
+    *   **Description:** Added functionality to convert Microsoft PowerPoint presentations (.pptx) to Word documents (.docx) using LibreOffice.
+    *   **Integration:** Updated `menu_handlers.py` to include a callback for this conversion and `main.py` to route to the new handler.
+
+3.  **Image Resizing:**
+    *   **File:** `image_processor.py` (newly created)
+    *   **Description:** Implemented a function to resize images to specified dimensions using the Pillow library.
+    *   **Integration:** Added `resize_image_start` and `handle_resize_input` functions in `file_handlers.py` to manage the conversation flow for resizing. Updated `menu_handlers.py` to add a "Resize Image" button for image types and `constants.py` for new conversation states (`RESIZE_INPUT`). `main.py` was updated to include the new handlers in the conversation flow.
+
+4.  **Image Rotation:**
+    *   **File:** `image_processor.py` (updated)
+    *   **Description:** Implemented a function to rotate images by a specified angle using the Pillow library.
+    *   **Integration:** Added `rotate_image_start` and `handle_rotate_input` functions in `file_handlers.py` to manage the conversation flow for rotation. Updated `menu_handlers.py` to add a "Rotate Image" button for image types and `constants.py` for new conversation states (`ROTATE_INPUT`). `main.py` was updated to include the new handlers in the conversation flow.
+
+5.  **Referral System:**
+    *   **Files:** `database.py`, `referral_system.py` (newly created), `.env`, `main.py`, `commands.py`
+    *   **Description:** Implemented a complete referral system allowing users to invite others and track their referrals. This includes generating unique referral codes, handling deep links for referrals, and providing a `/referral` command.
+    *   **Integration:**
+        *   `database.py`: Updated schema with `referral_code`, `referred_by`, `referrals_count` fields and new functions (`get_user`, `increment_referrals_count`).
+        *   `referral_system.py`: Encapsulates all referral logic (`generate_unique_referral_code`, `handle_referral_start`, `referral_command`).
+        *   `.env`: Added `BOT_USERNAME` for referral link construction.
+        *   `main.py`: Integrated `handle_referral_start` into `/start` command and registered `/referral` command.
+        *   `commands.py`: Added `/referral` to the list of user commands.
