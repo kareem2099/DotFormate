@@ -35,8 +35,8 @@ async def create_paypal_payment(user_id: int, amount: str, description: str):
             "payment_method": "paypal"
         },
         "redirect_urls": {
-            "return_url": f"https://your_bot_webhook_url/paypal_return?user_id={user_id}", # Placeholder, needs to be a real webhook
-            "cancel_url": f"https://your_bot_webhook_url/paypal_cancel?user_id={user_id}"  # Placeholder
+            "return_url": f"https://formate-eta.vercel.app/api/paypal_return?user_id={user_id}",
+            "cancel_url": f"https://formate-eta.vercel.app/api/paypal_cancel?user_id={user_id}"
         },
         "transactions": [{
             "item_list": {
@@ -57,6 +57,14 @@ async def create_paypal_payment(user_id: int, amount: str, description: str):
     })
 
     if payment.create():
+        # Save the PayPal payment ID and user's chat_id to the database
+        # The chat_id is needed for direct Telegram API calls from Vercel functions
+        user_chat_id = (await get_user(user_id)).get('chat_id') # Assuming chat_id is stored in user data
+        if user_chat_id:
+            await save_paypal_payment_info(user_id, user_chat_id, payment.id)
+        else:
+            logger.warning(f"Chat ID not found for user {user_id}. Cannot save PayPal payment info with chat_id.")
+
         for link in payment.links:
             if link.rel == "approval_url":
                 return link.href
