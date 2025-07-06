@@ -1,8 +1,9 @@
 import os
 import json
 import logging
-import requests # For direct Telegram API calls
+import requests
 from urllib.parse import urlparse, parse_qs
+
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -24,19 +25,22 @@ async def send_telegram_message(chat_id: int, text: str):
     }
     try:
         response = requests.post(url, json=payload)
-        response.raise_for_status() # Raise an exception for HTTP errors
+        response.raise_for_status()
         logger.info(f"Telegram message sent to {chat_id}: {text}")
         return True
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send Telegram message to {chat_id}: {e}")
         return False
 
-class Handler:
+def handler(request):
     """
     Vercel serverless function handler for PayPal cancel URL (browser redirect).
-    This class handles the request when PayPal redirects the user's browser back after cancellation.
+    This function handles the request when PayPal redirects the user's browser back after cancellation.
     """
-    async def __call__(self, request):
+    # Import asyncio to handle async operations
+    import asyncio
+    
+    async def async_handler():
         if request.method != 'GET':
             return {
                 'statusCode': 405,
@@ -72,7 +76,7 @@ class Handler:
             return {
                 'statusCode': 302,
                 'headers': {
-                    'Location': f'tg://resolve?domain=your_bot_username' # Or a simple HTML cancellation page
+                    'Location': f'tg://resolve?domain=your_bot_username'  # Or a simple HTML cancellation page
                 }
             }
 
@@ -85,5 +89,6 @@ class Handler:
                 'statusCode': 500,
                 'body': f'Internal Server Error: {e}'
             }
-
-handler = Handler()
+    
+    # Run the async function
+    return asyncio.run(async_handler())
