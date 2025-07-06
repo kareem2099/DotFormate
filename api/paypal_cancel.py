@@ -85,3 +85,5 @@ class Handler:
                 'statusCode': 500,
                 'body': f'Internal Server Error: {e}'
             }
+
+handler = Handler()
