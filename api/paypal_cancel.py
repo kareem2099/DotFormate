@@ -3,25 +3,25 @@ import json
 import logging
 import requests # For direct Telegram API calls
 from urllib.parse import urlparse, parse_qs
+import sys
+
+# Add the parent directory to the Python path to allow imports from the root
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Assuming these functions/constants are accessible.
-# In a real Vercel deployment, you might need to refactor or ensure proper
-# Python path setup for these imports to work across directories.
 try:
-    from database import update_user_data, get_user_by_paypal_payment_id # Assuming this function exists or will be created
+    from database import update_user_data, get_user_by_paypal_payment_id
     from constants import PAYMENT_PENDING, PAYMENT_FAILED
-except ImportError:
-    logger.warning("Could not import necessary modules for paypal_cancel. Simulating functions.")
+except ImportError as e:
+    logger.error(f"Failed to import necessary modules for paypal_cancel: {e}. Simulating functions.")
     async def update_user_data(user_id, data):
         logger.info(f"Simulating update_user_data for user {user_id} with {data}")
         pass
     async def get_user_by_paypal_payment_id(payment_id: str):
         logger.info(f"Simulating get_user_by_paypal_payment_id for {payment_id}")
-        # In a real scenario, this would query your database
         return {'user_id': 12345, 'chat_id': 67890} # Simulate a user
     PAYMENT_PENDING = "Payment simulated as cancelled."
     PAYMENT_FAILED = "Payment simulated as failed."
