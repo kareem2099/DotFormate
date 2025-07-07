@@ -3,4 +3,4 @@ paypalrestsdk
 pymongo
 python-telegram-bot
 python-http-client
-Flask
+Flask[async]
