@@ -79,16 +79,33 @@ async def execute_paypal_payment(payment_id: str, payer_id: str):
     Executes a PayPal payment.
     """
     # Configure PayPal SDK inside the function to ensure it's always set
+    paypal_mode = os.getenv("PAYPAL_MODE")
+    paypal_client_id = os.getenv("PAYPAL_CLIENT_ID")
+    paypal_client_secret = os.getenv("PAYPAL_CLIENT_SECRET")
+
     paypalrestsdk.configure({
-        "mode": os.getenv("PAYPAL_MODE"),
-        "client_id": os.getenv("PAYPAL_CLIENT_ID"),
-        "client_secret": os.getenv("PAYPAL_CLIENT_SECRET")
+        "mode": paypal_mode,
+        "client_id": paypal_client_id,
+        "client_secret": paypal_client_secret
     })
-    payment = paypalrestsdk.Payment.find(payment_id)
-    if payment.execute({"payer_id": payer_id}):
-        return True
-    logger.error(f"Failed to execute PayPal payment: {payment.error}")
-    return False
+    
+    logger.info(f"Executing PayPal payment with payment_id: {payment_id}, payer_id: {payer_id}")
+    logger.info(f"PayPal SDK configured with mode: {paypal_mode}")
+
+    try:
+        payment = paypalrestsdk.Payment.find(payment_id)
+        if payment.execute({"payer_id": payer_id}):
+            logger.info(f"PayPal payment {payment_id} executed successfully.")
+            return True
+        else:
+            logger.error(f"Failed to execute PayPal payment {payment_id}: {payment.error}")
+            return False
+    except paypalrestsdk.exceptions.ResourceNotFound as e:
+        logger.error(f"PayPal payment {payment_id} not found or invalid: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during PayPal payment execution for {payment_id}: {e}", exc_info=True)
+        return False
 
 async def handle_payment_command(update: Update, context: CallbackContext):
     """
