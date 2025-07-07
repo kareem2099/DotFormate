@@ -2,7 +2,7 @@ import logging
 from datetime import datetime # Import datetime for timestamp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
-from database import save_user_info
+from database import save_user_info, get_user # Import get_user
 from admin_handlers import send_admin_notification # Import for admin notifications
 from constants import MAIN_MENU
 
@@ -110,3 +110,19 @@ async def _get_file_info_from_update(update: Update, context: CallbackContext):
         logger.info(f"Processing pre-stored file from user_data: {file_name}, MIME type: {mime_type}")
     
     return file_id, file_name, mime_type
+
+async def balance_command(update: Update, context: CallbackContext) -> None:
+    """Handles the /balance command, showing the user's referral balance."""
+    user_id = update.effective_user.id
+    user = await get_user(user_id)
+
+    if not user:
+        await update.message.reply_text("I couldn't find your user data. Please try /start first.")
+        return
+
+    referral_balance = user.get('referral_balance', 0.0)
+    message_text = (
+        f"💰 Your current referral balance is: *${referral_balance:.2f}*.\n\n"
+        "Keep inviting friends to earn more rewards!"
+    )
+    await update.message.reply_text(message_text, parse_mode='Markdown')

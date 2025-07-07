@@ -30,6 +30,7 @@ async def handle_referral_start(update: Update, context: CallbackContext) -> Non
     This function should be called by the main /start handler.
     """
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id # Get chat_id
     username = update.effective_user.username
     first_name = update.effective_user.first_name
     last_name = update.effective_user.last_name
@@ -90,6 +91,7 @@ async def handle_referral_start(update: Update, context: CallbackContext) -> Non
     # Save/update user info with referral data
     await save_user_info(
         user_id=user_id,
+        chat_id=chat_id, # Pass chat_id
         username=username,
         first_name=first_name,
         last_name=last_name,
@@ -108,6 +110,7 @@ async def referral_command(update: Update, context: CallbackContext) -> int:
         referral_code = await generate_unique_referral_code()
         await save_user_info(
             user_id=user_id,
+            chat_id=update.effective_chat.id, # Pass chat_id
             username=update.effective_user.username,
             first_name=update.effective_user.first_name,
             last_name=update.effective_user.last_name,

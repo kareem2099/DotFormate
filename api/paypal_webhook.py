@@ -10,7 +10,7 @@ logger.setLevel(logging.INFO)
 
 # Assuming these modules are accessible in the Vercel environment
 from paypal_integration import execute_paypal_payment
-from database import update_user_data, get_user_by_paypal_payment_id
+from database import update_user_data, get_user_by_paypal_payment_id, get_user, increment_referral_balance
 from constants import PAYMENT_SUCCESS, PAYMENT_FAILED
 
 app = Flask(__name__)
@@ -68,6 +68,31 @@ async def paypal_webhook_handler():
                         await update_user_data(user_id, {'subscription_status': 'active'})
                         await send_telegram_message(chat_id, PAYMENT_SUCCESS)
                         logger.info(f"PayPal payment {payment_id} successfully processed via webhook for user {user_id}.")
+
+                        # Check if the user was referred and award the referrer
+                        referred_user_data = await get_user(user_id)
+                        referred_by_user_id = referred_user_data.get('referred_by')
+                        
+                        if referred_by_user_id:
+                            # Get the payment amount from the resource
+                            # Assuming 'amount' is available in the resource object
+                            # You might need to adjust this path based on actual PayPal webhook structure
+                            payment_amount_obj = resource.get('transactions', [{}])[0].get('amount', {})
+                            payment_value = float(payment_amount_obj.get('total', '0.0'))
+                            
+                            referral_reward = payment_value * 0.20 # 20% of the payment
+
+                            if referral_reward > 0:
+                                await increment_referral_balance(referred_by_user_id, referral_reward)
+                                referrer_user = await get_user(referred_by_user_id)
+                                referrer_username = referrer_user.get('username') or referrer_user.get('first_name')
+                                if referrer_user and referrer_user.get('chat_id'):
+                                    await send_telegram_message(
+                                        referrer_user['chat_id'],
+                                        f"🎉 Great news! Your referred friend just made a payment of ${payment_value:.2f} and you earned ${referral_reward:.2f} in referral rewards! Your new balance is ${referrer_user.get('referral_balance', 0.0) + referral_reward:.2f}."
+                                    )
+                                logger.info(f"Awarded {referral_reward:.2f} to referrer {referred_by_user_id} for payment {payment_id}.")
+                        
                         return jsonify({'status': 'success', 'message': 'Payment processed successfully.'}), 200
                     else:
                         await send_telegram_message(chat_id, PAYMENT_FAILED)

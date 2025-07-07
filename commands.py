@@ -10,23 +10,24 @@ logger = logging.getLogger(__name__)
 USER_COMMANDS = [
     BotCommand("start", "🚀 Start the bot and see all conversion options"),
     BotCommand("help", "❓ Get help on how to use this bot"),
-    BotCommand("pdf2png", "📄➡️🖼️ Convert a PDF file to PNG images"),
-    BotCommand("png2pdf", "🖼️➡️📄 Convert PNG images to a PDF file"),
-    BotCommand("jpg2pdf", "📸➡️📄 Convert JPG images to a PDF file"),
-    BotCommand("webp2pdf", "🌐➡️📄 Convert WEBP images to a PDF file"),
-    BotCommand("tiff2pdf", "📁➡️📄 Convert TIFF images to a PDF file"),
-    BotCommand("docx2pdf", "📝➡️📄 Convert Word to PDF"),
-    BotCommand("pdf2docx", "📄➡️📝 Convert PDF to Word"),
-    BotCommand("pptx2pdf", "📊➡️📄 Convert PowerPoint to PDF"),
-    BotCommand("pdf2pptx", "📄➡️📊 Convert PDF to PowerPoint"),
-    BotCommand("ocr", "📄 Extract text from images or PDFs"),
-    BotCommand("mergepdf", "➕ Combine multiple PDFs into one"),
-    BotCommand("splitpdf", "✂️ Split a PDF into multiple files"),
-    BotCommand("compress", "🗜️ Reduce the file size of PDFs or images"),
-    BotCommand("watermark", "✍️ Add text or image watermarks to files"),
-    BotCommand("url", "🔗 Convert files directly from a URL"),
+    # BotCommand("pdf2png", "📄➡️🖼️ Convert a PDF file to PNG images"),
+    # BotCommand("png2pdf", "🖼️➡️📄 Convert PNG images to a PDF file"),
+    # BotCommand("jpg2pdf", "📸➡️📄 Convert JPG images to a PDF file"),
+    # BotCommand("webp2pdf", "🌐➡️📄 Convert WEBP images to a PDF file"),
+    # BotCommand("tiff2pdf", "📁➡️📄 Convert TIFF images to a PDF file"),
+    # BotCommand("docx2pdf", "📝➡️📄 Convert Word to PDF"),
+    # BotCommand("pdf2docx", "📄➡️📝 Convert PDF to Word"),
+    # BotCommand("pptx2pdf", "📊➡️📄 Convert PowerPoint to PDF"),
+    # BotCommand("pdf2pptx", "📄➡️📊 Convert PDF to PowerPoint"),
+    # BotCommand("ocr", "📄 Extract text from images or PDFs"),
+    # BotCommand("mergepdf", "➕ Combine multiple PDFs into one"),
+    # BotCommand("splitpdf", "✂️ Split a PDF into multiple files"),
+    # BotCommand("compress", "🗜️ Reduce the file size of PDFs or images"),
+    # BotCommand("watermark", "✍️ Add text or image watermarks to files"),
+    # BotCommand("url", "🔗 Convert files directly from a URL"),
     BotCommand("cancel", "❌ Cancel the current operation"),
     BotCommand("referral", "🎁 Get your referral link and track invites"),
+    BotCommand("balance", "💰 Check your referral balance"),
     BotCommand("payment", "💳 Make a payment or donation")
 ]
 
@@ -116,6 +117,7 @@ async def handle_backup_command(update: Update, context: CallbackContext):
         "Backup functionality coming soon.\n"
         "Implementation in progress...",
         parse_mode="Markdown"
+
     )
 
 async def handle_maintenance_command(update: Update, context: CallbackContext):

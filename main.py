@@ -22,7 +22,7 @@ from constants import (
 )
 
 # Import handlers from various modules
-from utility_handlers import start, help_command, cancel # Centralized utility functions
+from utility_handlers import start, help_command, cancel, balance_command # Centralized utility functions
 from referral_system import handle_referral_start, referral_command
 from paypal_integration import (
     handle_payment_command, handle_payment_option_selection, handle_payment_method_selection,
@@ -88,6 +88,7 @@ def main():
     # Add command handlers
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("referral", referral_command))
+    application.add_handler(CommandHandler("balance", balance_command)) # New balance command
     application.add_handler(CommandHandler("payment", handle_payment_command)) # New payment command
     
     # Admin command handlers with filter
