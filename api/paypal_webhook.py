@@ -1,19 +1,14 @@
 import os
-import json
 import logging
-import requests
-from urllib.parse import urlparse, parse_qs
 
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-from paypal_integration import execute_paypal_payment
-from database import update_user_data, get_user_by_paypal_payment_id
-from constants import PAYMENT_SUCCESS, PAYMENT_FAILED
-
 async def send_telegram_message(chat_id: int, text: str):
     """Sends a message to a Telegram user using the Bot API."""
+    import requests # Lazy import requests
+    import json # Lazy import json
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN not set in environment variables.")
@@ -38,6 +33,12 @@ async def handler(request):
     Vercel serverless function handler for PayPal webhooks.
     This function will be triggered by PayPal's webhook notifications.
     """
+    # Lazy import modules to avoid top-level execution issues
+    from paypal_integration import execute_paypal_payment
+    from database import update_user_data, get_user_by_paypal_payment_id
+    from constants import PAYMENT_SUCCESS, PAYMENT_FAILED
+    import json # Ensure json is available if not already imported by send_telegram_message
+
     if request.method != 'POST':
         return {
             'statusCode': 405,
