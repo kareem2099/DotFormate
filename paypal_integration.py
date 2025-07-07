@@ -63,11 +63,16 @@ async def create_paypal_payment(user_id: int, amount: str, description: str):
     if payment.create():
         # Save the PayPal payment ID and user's chat_id to the database
         # The chat_id is needed for direct Telegram API calls from Vercel functions
-        user_chat_id = (await get_user(user_id)).get('chat_id') # Assuming chat_id is stored in user data
+        user_data = await get_user(user_id)
+        user_chat_id = user_data.get('chat_id') if user_data else None
+        
+        logger.info(f"In create_paypal_payment: user_id={user_id}, retrieved user_chat_id={user_chat_id}")
+
         if user_chat_id:
             await save_paypal_payment_info(user_id, user_chat_id, payment.id)
+            logger.info(f"Saved PayPal payment info for user {user_id} with payment ID {payment.id} and chat ID {user_chat_id}.")
         else:
-            logger.warning(f"Chat ID not found for user {user_id}. Cannot save PayPal payment info with chat_id.")
+            logger.warning(f"Chat ID not found for user {user_id}. Cannot save PayPal payment info with chat_id. User data: {user_data}")
 
         for link in payment.links:
             if link.rel == "approval_url":
