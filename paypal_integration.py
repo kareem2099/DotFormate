@@ -6,6 +6,7 @@ from database import get_user, update_user_data, save_paypal_payment_info
 import os
 import paypalrestsdk
 import logging
+import asyncio # Import asyncio for sleep
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from telegram.error import BadRequest # Import BadRequest
@@ -92,20 +93,28 @@ async def execute_paypal_payment(payment_id: str, payer_id: str):
     logger.info(f"Executing PayPal payment with payment_id: {payment_id}, payer_id: {payer_id}")
     logger.info(f"PayPal SDK configured with mode: {paypal_mode}")
 
-    try:
-        payment = paypalrestsdk.Payment.find(payment_id)
-        if payment.execute({"payer_id": payer_id}):
-            logger.info(f"PayPal payment {payment_id} executed successfully.")
-            return True
-        else:
-            logger.error(f"Failed to execute PayPal payment {payment_id}: {payment.error}")
+    retries = 3
+    for i in range(retries):
+        try:
+            payment = paypalrestsdk.Payment.find(payment_id)
+            if payment.execute({"payer_id": payer_id}):
+                logger.info(f"PayPal payment {payment_id} executed successfully.")
+                return True
+            else:
+                logger.error(f"Failed to execute PayPal payment {payment_id}: {payment.error}")
+                # If execution fails for reasons other than ResourceNotFound, don't retry
+                return False
+        except paypalrestsdk.exceptions.ResourceNotFound as e:
+            logger.warning(f"PayPal payment {payment_id} not found or invalid on attempt {i+1}/{retries}: {e}")
+            if i < retries - 1:
+                await asyncio.sleep(2 ** i) # Exponential backoff: 1, 2, 4 seconds
+            else:
+                logger.error(f"PayPal payment {payment_id} not found or invalid after {retries} attempts.")
+                return False
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during PayPal payment execution for {payment_id} on attempt {i+1}/{retries}: {e}", exc_info=True)
             return False
-    except paypalrestsdk.exceptions.ResourceNotFound as e:
-        logger.error(f"PayPal payment {payment_id} not found or invalid: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during PayPal payment execution for {payment_id}: {e}", exc_info=True)
-        return False
+    return False # Should not be reached if retries are exhausted and no success
 
 async def handle_payment_command(update: Update, context: CallbackContext):
     """
