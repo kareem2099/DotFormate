@@ -21,16 +21,17 @@ from admin_handlers import send_admin_notification
 logger = logging.getLogger(__name__)
 
 # Configure PayPal SDK
-paypalrestsdk.configure({
-    "mode": os.getenv("PAYPAL_MODE"),
-    "client_id": os.getenv("PAYPAL_CLIENT_ID"),
-    "client_secret": os.getenv("PAYPAL_CLIENT_SECRET")
-})
-
 async def create_paypal_payment(user_id: int, amount: str, description: str):
     """
     Creates a PayPal payment and returns the approval URL.
     """
+    # Configure PayPal SDK inside the function to avoid top-level execution issues
+    paypalrestsdk.configure({
+        "mode": os.getenv("PAYPAL_MODE"),
+        "client_id": os.getenv("PAYPAL_CLIENT_ID"),
+        "client_secret": os.getenv("PAYPAL_CLIENT_SECRET")
+    })
+
     payment = paypalrestsdk.Payment({
         "intent": "sale",
         "payer": {
