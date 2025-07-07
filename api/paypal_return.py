@@ -4,8 +4,6 @@ import logging
 import requests
 import asyncio
 from urllib.parse import urlparse, parse_qs
-from http import HTTPStatus
-from vercel_python import Response
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -187,11 +185,11 @@ def handler(request):
         logger.info(f"Request URL: {getattr(request, 'url', 'URL not available')}")
         
         if request.method != 'GET':
-            return Response(
-                status_code=HTTPStatus.METHOD_NOT_ALLOWED,
-                headers={'Content-Type': 'text/html'},
-                body=create_error_page('Method Not Allowed')
-            )
+            return {
+                'statusCode': 405,
+                'headers': {'Content-Type': 'text/html'},
+                'body': create_error_page('Method Not Allowed')
+            }
 
         try:
             # Extract query parameters from the request URL
@@ -228,11 +226,11 @@ def handler(request):
                     except Exception as e:
                         logger.error(f"Failed to send error notification: {e}")
                 
-                return Response(
-                    status_code=HTTPStatus.BAD_REQUEST,
-                    headers={'Content-Type': 'text/html'},
-                    body=create_error_page(error_msg)
-                )
+                return {
+                    'statusCode': 400,
+                    'headers': {'Content-Type': 'text/html'},
+                    'body': create_error_page(error_msg)
+                }
 
             # Convert user_id to int
             try:
@@ -240,11 +238,11 @@ def handler(request):
             except ValueError:
                 error_msg = "Invalid user ID format"
                 logger.error(error_msg)
-                return Response(
-                    status_code=HTTPStatus.BAD_REQUEST,
-                    headers={'Content-Type': 'text/html'},
-                    body=create_error_page(error_msg)
-                )
+                return {
+                    'statusCode': 400,
+                    'headers': {'Content-Type': 'text/html'},
+                    'body': create_error_page(error_msg)
+                }
 
             logger.info(f"Processing PayPal payment execution for user {user_id}")
             
@@ -268,11 +266,11 @@ def handler(request):
                 
                 logger.info(f"PayPal payment {payment_id} successfully processed for user {user_id}")
                 
-                return Response(
-                    status_code=HTTPStatus.OK,
-                    headers={'Content-Type': 'text/html'},
-                    body=create_success_page(user_id)
-                )
+                return {
+                    'statusCode': 200,
+                    'headers': {'Content-Type': 'text/html'},
+                    'body': create_success_page(user_id)
+                }
             else:
                 # Send failure message to Telegram
                 try:
@@ -282,11 +280,11 @@ def handler(request):
                     logger.error(f"Failed to send failure message: {e}")
                 
                 logger.error(f"PayPal payment {payment_id} failed execution for user {user_id}")
-                return Response(
-                    status_code=HTTPStatus.OK,
-                    headers={'Content-Type': 'text/html'},
-                    body=create_error_page('Payment execution failed')
-                )
+                return {
+                    'statusCode': 200,  # Still return 200 for HTML page
+                    'headers': {'Content-Type': 'text/html'},
+                    'body': create_error_page('Payment execution failed')
+                }
 
         except Exception as e:
             logger.error(f"Error processing PayPal return: {e}", exc_info=True)
@@ -298,22 +296,19 @@ def handler(request):
                 except Exception as notify_error:
                     logger.error(f"Failed to send error notification: {notify_error}")
             
-            return Response(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                headers={'Content-Type': 'text/html'},
-                body=create_error_page(f'Internal Server Error: {str(e)}')
-            )
+            return {
+                'statusCode': 500,
+                'headers': {'Content-Type': 'text/html'},
+                'body': create_error_page(f'Internal Server Error: {str(e)}')
+            }
     
     # Run the async function
     try:
         return asyncio.run(async_handler())
     except Exception as e:
         logger.error(f"Failed to run async handler: {e}", exc_info=True)
-        return Response(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            headers={'Content-Type': 'text/html'},
-            body=create_error_page(f'Handler Error: {str(e)}')
-        )
-
-# Vercel requires this export
-__all__ = ['handler']
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'text/html'},
+            'body': create_error_page(f'Handler Error: {str(e)}')
+        }
