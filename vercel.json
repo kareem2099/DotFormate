@@ -3,7 +3,7 @@
   "builds": [
     {
       "src": "api/test.py",
-      "use": "@vercel/python",
+      "use": "@vercel/python@3.0.0",
       "config": { 
         "maxLambdaSize": "15mb",
         "runtime": "python3.9"
