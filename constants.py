@@ -11,7 +11,7 @@ PAYMENT_PENDING = "⏳ Your payment is pending. We will notify you once it's con
 
 # Payment Options
 PAYMENT_OPTIONS = {
-    "week": {"amount": "5.00", "description": "Weekly Subscription"},
+    "week": {"amount": "1.00", "description": "Weekly Subscription"},
     "month": {"amount": "15.00", "description": "Monthly Subscription"},
     "half_year": {"amount": "60.00", "description": "Half-Yearly Subscription"},
     "year": {"amount": "150.00", "description": "Yearly Subscription"},
