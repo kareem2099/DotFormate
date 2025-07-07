@@ -44,10 +44,10 @@ async def handler(request):
         }
 
     try:
-        # Extract query parameters from the request URL
-        query_params = parse_qs(urlparse(request.url).query)
+        # Extract query parameters from the request
+        query_params = request.query
         
-        user_id = query_params.get('user_id', [None])[0]
+        user_id = query_params.get('user_id')
         # PayPal cancel URL might not always include paymentId or PayerID,
         # but user_id should be present if we passed it.
 

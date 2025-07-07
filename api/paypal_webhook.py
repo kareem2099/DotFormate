@@ -46,12 +46,8 @@ async def handler(request):
 
     try:
         # Parse request body
-        if hasattr(request, 'json'):
-            body = await request.json()
-        else:
-            # Alternative way to get body for different request types
-            body_text = request.body.decode('utf-8') if hasattr(request, 'body') else '{}'
-            body = json.loads(body_text)
+        # Vercel's request object for webhooks typically provides the body directly
+        body = await request.json()
         
         logger.info(f"Received PayPal webhook: {json.dumps(body)}")
 

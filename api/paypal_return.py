@@ -183,26 +183,13 @@ async def handler(request):
         }
 
     try:
-        # Extract query parameters from the request URL
-        if hasattr(request, 'url'):
-            query_params = parse_qs(urlparse(request.url).query)
-        elif hasattr(request, 'args'):
-            # Alternative way to get query params
-            query_params = dict(request.args)
-            # Convert single values to lists for consistency
-            query_params = {k: [v] if not isinstance(v, list) else v for k, v in query_params.items()}
-        else:
-            logger.error("Cannot extract query parameters from request")
-            return {
-                'statusCode': 400,
-                'headers': {'Content-Type': 'text/html'},
-                'body': create_error_page('Cannot parse request parameters')
-            }
+        # Extract query parameters from the request
+        query_params = request.query
         
-        user_id = query_params.get('user_id', [None])[0]
-        payment_id = query_params.get('paymentId', [None])[0]
-        payer_id = query_params.get('PayerID', [None])[0]
-        token = query_params.get('token', [None])[0]
+        user_id = query_params.get('user_id')
+        payment_id = query_params.get('paymentId')
+        payer_id = query_params.get('PayerID')
+        token = query_params.get('token')
 
         logger.info(f"Extracted parameters - user_id: {user_id}, payment_id: {payment_id}, payer_id: {payer_id}, token: {token}")
 
