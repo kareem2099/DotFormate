@@ -4,7 +4,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-async def handler(request):
+def handler(request):
     logger.info(f"PayPal return handler called with method: {request.method}")
     logger.info(f"Request URL: {getattr(request, 'url', 'URL not available')}")
     
