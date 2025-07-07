@@ -53,7 +53,7 @@ async def paypal_return_handler():
         user_id = int(user_id)
 
         # Execute the PayPal payment
-        success = await execute_paypal_payment(paymentId, PayerID)
+        success, error_details = await execute_paypal_payment(paymentId, PayerID)
 
         if success:
             await update_user_data(user_id, {'subscription_status': 'active'})
@@ -62,12 +62,21 @@ async def paypal_return_handler():
             # Redirect user back to Telegram bot
             return redirect(f'tg://resolve?domain=your_bot_username') # Replace with actual bot username
         else:
-            await send_telegram_message(user_id, PAYMENT_FAILED)
-            logger.error(f"PayPal payment {paymentId} failed execution for user {user_id}.")
-            return jsonify({'status': 'error', 'message': 'Payment execution failed.'}), 500
+            error_message_for_user = PAYMENT_FAILED
+            if error_details and isinstance(error_details, dict):
+                error_name = error_details.get('name', 'Unknown Error')
+                error_message = error_details.get('message', 'No specific message.')
+                error_message_for_user += f" (Reason: {error_name} - {error_message})"
+                logger.error(f"PayPal payment {paymentId} failed execution for user {user_id}. Details: {error_details}")
+            else:
+                logger.error(f"PayPal payment {paymentId} failed execution for user {user_id}. No specific error details.")
+            
+            await send_telegram_message(user_id, error_message_for_user)
+            return jsonify({'status': 'error', 'message': 'Payment execution failed.', 'details': error_details}), 500
 
     except Exception as e:
         logger.error(f"Error processing PayPal return: {e}", exc_info=True)
-        if 'user_id' in locals() and user_id:
-            await send_telegram_message(user_id, PAYMENT_FAILED + f" (Error: {e})")
+        user_id_in_scope = locals().get('user_id')
+        if user_id_in_scope:
+            await send_telegram_message(user_id_in_scope, PAYMENT_FAILED + f" (Internal Error: {e})")
         return jsonify({'status': 'error', 'message': f'Internal Server Error: {e}'}), 500

@@ -104,22 +104,23 @@ async def execute_paypal_payment(payment_id: str, payer_id: str):
             payment = paypalrestsdk.Payment.find(payment_id)
             if payment.execute({"payer_id": payer_id}):
                 logger.info(f"PayPal payment {payment_id} executed successfully.")
-                return True
+                return True, None # Return True for success, None for error details
             else:
-                logger.error(f"Failed to execute PayPal payment {payment_id}: {payment.error}")
+                error_details = payment.error
+                logger.error(f"Failed to execute PayPal payment {payment_id}: {error_details}")
                 # If execution fails for reasons other than ResourceNotFound, don't retry
-                return False
+                return False, error_details # Return False for failure, and the error details
         except paypalrestsdk.exceptions.ResourceNotFound as e:
             logger.warning(f"PayPal payment {payment_id} not found or invalid on attempt {i+1}/{retries}: {e}")
             if i < retries - 1:
                 await asyncio.sleep(2 ** i) # Exponential backoff: 1, 2, 4 seconds
             else:
                 logger.error(f"PayPal payment {payment_id} not found or invalid after {retries} attempts.")
-                return False
+                return False, {"name": "ResourceNotFound", "message": str(e)} # Return error details
         except Exception as e:
             logger.error(f"An unexpected error occurred during PayPal payment execution for {payment_id} on attempt {i+1}/{retries}: {e}", exc_info=True)
-            return False
-    return False # Should not be reached if retries are exhausted and no success
+            return False, {"name": "UnexpectedError", "message": str(e)} # Return error details
+    return False, {"name": "UnknownError", "message": "Payment execution failed after retries."} # Should not be reached if retries are exhausted and no success
 
 async def handle_payment_command(update: Update, context: CallbackContext):
     """
