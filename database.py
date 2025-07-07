@@ -58,8 +58,8 @@ class MongoDBManager:
             self.client = None
             self.db = None
 
-async def save_user_info(user_id: int, username: str, first_name: str, last_name: str, referral_code: str = None, referred_by: int = None):
-    """Saves or updates user information in the database, including referral data."""
+async def save_user_info(user_id: int, chat_id: int, username: str, first_name: str, last_name: str, referral_code: str = None, referred_by: int = None):
+    """Saves or updates user information in the database, including referral data and chat_id."""
     db_manager = MongoDBManager()
     db = db_manager.get_db()
     if db is None:
@@ -71,6 +71,7 @@ async def save_user_info(user_id: int, username: str, first_name: str, last_name
     # Prepare user data, including referral fields if provided
     user_data = {
         "user_id": user_id,
+        "chat_id": chat_id, # Always save chat_id
         "username": username,
         "first_name": first_name,
         "last_name": last_name,

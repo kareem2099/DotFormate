@@ -20,8 +20,10 @@ async def send_or_edit_message(update: Update, text: str, reply_markup: InlineKe
 async def start(update: Update, context: CallbackContext) -> int:
     """Send a welcome message and main menu when the command /start is issued or 'Back to Main Menu' is selected."""
     user = update.effective_user
+    chat_id = update.effective_chat.id # Get the chat_id
     is_new_user = await save_user_info(
         user_id=user.id,
+        chat_id=chat_id, # Pass chat_id to save_user_info
         username=user.username,
         first_name=user.first_name,
         last_name=user.last_name
