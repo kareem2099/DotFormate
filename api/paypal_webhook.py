@@ -2,7 +2,10 @@ import os
 import json
 import logging
 import requests
+import asyncio
 from urllib.parse import urlparse, parse_qs
+from http import HTTPStatus
+from vercel_python import Response
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -42,10 +45,10 @@ def handler(request):
     
     async def async_handler():
         if request.method != 'POST':
-            return {
-                'statusCode': 405,
-                'body': 'Method Not Allowed'
-            }
+            return Response(
+                status_code=HTTPStatus.METHOD_NOT_ALLOWED,
+                body='Method Not Allowed'
+            )
 
         try:
             # Parse request body
@@ -75,45 +78,48 @@ def handler(request):
                         await update_user_data(user_id, {'subscription_status': 'active'})
                         await send_telegram_message(chat_id, PAYMENT_SUCCESS)
                         logger.info(f"PayPal payment {payment_id} successfully processed via webhook for user {user_id}.")
-                        return {
-                            'statusCode': 200,
-                            'body': 'Payment processed successfully.'
-                        }
+                        return Response(
+                            status_code=HTTPStatus.OK,
+                            body='Payment processed successfully.'
+                        )
                     else:
                         await send_telegram_message(chat_id, PAYMENT_FAILED)
                         logger.error(f"PayPal payment {payment_id} failed execution via webhook for user {user_id}.")
-                        return {
-                            'statusCode': 500,
-                            'body': 'Payment execution failed.'
-                        }
+                        return Response(
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            body='Payment execution failed.'
+                        )
                 else:
                     logger.warning(f"Missing payment_id, payer_id, user_id, or chat_id in webhook: {body}")
                     # Attempt to notify if chat_id is available from user_data even if other details are missing
                     if chat_id:
                         await send_telegram_message(chat_id, PAYMENT_FAILED + " (Missing payment details in webhook)")
-                    return {
-                        'statusCode': 400,
-                        'body': 'Missing required payment details or user not found.'
-                    }
+                    return Response(
+                        status_code=HTTPStatus.BAD_REQUEST,
+                        body='Missing required payment details or user not found.'
+                    )
             else:
                 logger.info(f"Received non-completion PayPal webhook event: {event_type}")
-                return {
-                    'statusCode': 200,
-                    'body': f'Event type {event_type} received, no action taken.'
-                }
+                return Response(
+                    status_code=HTTPStatus.OK,
+                    body=f'Event type {event_type} received, no action taken.'
+                )
 
         except json.JSONDecodeError:
             logger.error("Invalid JSON received in webhook request.")
-            return {
-                'statusCode': 400,
-                'body': 'Invalid JSON'
-            }
+            return Response(
+                status_code=HTTPStatus.BAD_REQUEST,
+                body='Invalid JSON'
+            )
         except Exception as e:
             logger.error(f"Error processing PayPal webhook: {e}", exc_info=True)
-            return {
-                'statusCode': 500,
-                'body': f'Internal Server Error: {e}'
-            }
+            return Response(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                body=f'Internal Server Error: {e}'
+            )
     
     # Run the async function
     return asyncio.run(async_handler())
+
+# Vercel requires this export
+__all__ = ['handler']

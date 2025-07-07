@@ -2,3 +2,5 @@ requests
 paypalrestsdk
 pymongo
 python-telegram-bot
+python-http-client
+vercel-python
