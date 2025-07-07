@@ -9,13 +9,6 @@ from urllib.parse import urlparse, parse_qs
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Create a console handler to see logs
-if not logger.handlers:
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
 
 from paypal_integration import execute_paypal_payment
 from database import update_user_data
