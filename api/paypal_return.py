@@ -20,3 +20,5 @@ def handler(request):
         'headers': {'Content-Type': 'text/plain'},
         'body': 'OK - PayPal Return Endpoint Test'
     }
+
+app = handler
