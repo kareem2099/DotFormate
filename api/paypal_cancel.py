@@ -1,3 +1,4 @@
+from flask import Flask, request, jsonify, redirect
 import os
 import json
 import logging
@@ -8,9 +9,14 @@ from urllib.parse import urlparse, parse_qs
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-from database import update_user_data, get_user_by_paypal_payment_id
-from constants import PAYMENT_PENDING, PAYMENT_FAILED
+# Assuming database and constants are accessible or will be mocked/handled appropriately in a real deployment
+# from database import update_user_data, get_user_by_paypal_payment_id
+# from constants import PAYMENT_PENDING, PAYMENT_FAILED
 
+app = Flask(__name__)
+
+# Placeholder for send_telegram_message and constants if not directly imported
+# In a real scenario, ensure these are properly imported or defined.
 async def send_telegram_message(chat_id: int, text: str):
     """Sends a message to a Telegram user using the Bot API."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -32,20 +38,19 @@ async def send_telegram_message(chat_id: int, text: str):
         logger.error(f"Failed to send Telegram message to {chat_id}: {e}")
         return False
 
-async def handler(request):
+PAYMENT_PENDING = "Your payment is pending."
+PAYMENT_FAILED = "Your payment has failed."
+
+
+@app.route('/api/paypal_cancel', methods=['GET'])
+async def paypal_cancel_handler():
     """
     Vercel serverless function handler for PayPal cancel URL (browser redirect).
     This function handles the request when PayPal redirects the user's browser back after cancellation.
     """
-    if request.method != 'GET':
-        return {
-            'statusCode': 405,
-            'body': 'Method Not Allowed'
-        }
-
     try:
         # Extract query parameters from the request
-        query_params = request.query
+        query_params = request.args
         
         user_id = query_params.get('user_id')
         # PayPal cancel URL might not always include paymentId or PayerID,
@@ -55,10 +60,7 @@ async def handler(request):
 
         if not user_id:
             logger.warning("Missing user_id in PayPal cancel URL.")
-            return {
-                'statusCode': 400,
-                'body': 'Missing user ID.'
-            }
+            return jsonify({'status': 'error', 'message': 'Missing user ID.'}), 400
 
         # Convert user_id to int
         user_id = int(user_id)
@@ -69,19 +71,11 @@ async def handler(request):
         
         # Redirect user back to Telegram bot
         # Replace YOUR_BOT_USERNAME with your actual bot's username
-        return {
-            'statusCode': 302,
-            'headers': {
-                'Location': f'tg://resolve?domain=your_bot_username'  # Or a simple HTML cancellation page
-            }
-        }
+        return redirect(f'tg://resolve?domain=your_bot_username')  # Or a simple HTML cancellation page
 
     except Exception as e:
         logger.error(f"Error processing PayPal cancel: {e}", exc_info=True)
         # Attempt to notify user if user_id is available
         if 'user_id' in locals() and user_id:
             await send_telegram_message(user_id, PAYMENT_FAILED + f" (Error: {e})")
-        return {
-            'statusCode': 500,
-            'body': f'Internal Server Error: {e}'
-        }
+        return jsonify({'status': 'error', 'message': f'Internal Server Error: {e}'}), 500
