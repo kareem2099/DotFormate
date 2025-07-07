@@ -78,6 +78,12 @@ async def execute_paypal_payment(payment_id: str, payer_id: str):
     """
     Executes a PayPal payment.
     """
+    # Configure PayPal SDK inside the function to ensure it's always set
+    paypalrestsdk.configure({
+        "mode": os.getenv("PAYPAL_MODE"),
+        "client_id": os.getenv("PAYPAL_CLIENT_ID"),
+        "client_secret": os.getenv("PAYPAL_CLIENT_SECRET")
+    })
     payment = paypalrestsdk.Payment.find(payment_id)
     if payment.execute({"payer_id": payer_id}):
         return True
