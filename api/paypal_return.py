@@ -1,24 +1,23 @@
-import os
+from flask import Flask, request, jsonify
 import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-def handler(request):
+app = Flask(__name__)
+
+@app.route('/api/paypal_return', methods=['GET'])
+def paypal_return_handler():
     logger.info(f"PayPal return handler called with method: {request.method}")
-    logger.info(f"Request URL: {getattr(request, 'url', 'URL not available')}")
+    logger.info(f"Request URL: {request.url}")
     
-    if request.method != 'GET':
-        return {
-            'statusCode': 405,
-            'headers': {'Content-Type': 'text/plain'},
-            'body': 'Method Not Allowed'
-        }
+    # You can access query parameters like this:
+    # user_id = request.args.get('user_id')
+    # paymentId = request.args.get('paymentId')
+    # token = request.args.get('token')
+    # PayerID = request.args.get('PayerID')
 
-    return {
-        'statusCode': 200,
-        'headers': {'Content-Type': 'text/plain'},
-        'body': 'OK - PayPal Return Endpoint Test'
-    }
+    # Add your PayPal return logic here
+    # For example, verify the payment with PayPal API
 
-app = handler
+    return jsonify({'status': 'OK', 'message': 'PayPal Return Endpoint Test'})
