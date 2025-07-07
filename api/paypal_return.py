@@ -174,141 +174,128 @@ def create_error_page(error_message: str):
     </html>
     """
 
-def handler(request):
+async def handler(request):
     """
     Vercel serverless function handler for PayPal return URL (browser redirect).
     This function is called when PayPal redirects the user's browser back to your app.
     """
+    logger.info(f"PayPal return handler called with method: {request.method}")
+    logger.info(f"Request URL: {getattr(request, 'url', 'URL not available')}")
     
-    async def async_handler():
-        logger.info(f"PayPal return handler called with method: {request.method}")
-        logger.info(f"Request URL: {getattr(request, 'url', 'URL not available')}")
-        
-        if request.method != 'GET':
+    if request.method != 'GET':
+        return {
+            'statusCode': 405,
+            'headers': {'Content-Type': 'text/html'},
+            'body': create_error_page('Method Not Allowed')
+        }
+
+    try:
+        # Extract query parameters from the request URL
+        if hasattr(request, 'url'):
+            query_params = parse_qs(urlparse(request.url).query)
+        elif hasattr(request, 'args'):
+            # Alternative way to get query params
+            query_params = dict(request.args)
+            # Convert single values to lists for consistency
+            query_params = {k: [v] if not isinstance(v, list) else v for k, v in query_params.items()}
+        else:
+            logger.error("Cannot extract query parameters from request")
             return {
-                'statusCode': 405,
+                'statusCode': 400,
                 'headers': {'Content-Type': 'text/html'},
-                'body': create_error_page('Method Not Allowed')
+                'body': create_error_page('Cannot parse request parameters')
             }
+        
+        user_id = query_params.get('user_id', [None])[0]
+        payment_id = query_params.get('paymentId', [None])[0]
+        payer_id = query_params.get('PayerID', [None])[0]
+        token = query_params.get('token', [None])[0]
 
-        try:
-            # Extract query parameters from the request URL
-            if hasattr(request, 'url'):
-                query_params = parse_qs(urlparse(request.url).query)
-            elif hasattr(request, 'args'):
-                # Alternative way to get query params
-                query_params = dict(request.args)
-                # Convert single values to lists for consistency
-                query_params = {k: [v] if not isinstance(v, list) else v for k, v in query_params.items()}
-            else:
-                logger.error("Cannot extract query parameters from request")
-                return {
-                    'statusCode': 400,
-                    'headers': {'Content-Type': 'text/html'},
-                    'body': create_error_page('Cannot parse request parameters')
-                }
-            
-            user_id = query_params.get('user_id', [None])[0]
-            payment_id = query_params.get('paymentId', [None])[0]
-            payer_id = query_params.get('PayerID', [None])[0]
-            token = query_params.get('token', [None])[0]
+        logger.info(f"Extracted parameters - user_id: {user_id}, payment_id: {payment_id}, payer_id: {payer_id}, token: {token}")
 
-            logger.info(f"Extracted parameters - user_id: {user_id}, payment_id: {payment_id}, payer_id: {payer_id}, token: {token}")
-
-            if not all([user_id, payment_id, payer_id]):
-                error_msg = "Missing required parameters in PayPal return URL"
-                logger.warning(error_msg)
-                
-                # Attempt to notify user if user_id is available
-                if user_id:
-                    try:
-                        await send_telegram_message(int(user_id), PAYMENT_FAILED + " (Missing payment details)")
-                    except Exception as e:
-                        logger.error(f"Failed to send error notification: {e}")
-                
-                return {
-                    'statusCode': 400,
-                    'headers': {'Content-Type': 'text/html'},
-                    'body': create_error_page(error_msg)
-                }
-
-            # Convert user_id to int
-            try:
-                user_id = int(user_id)
-            except ValueError:
-                error_msg = "Invalid user ID format"
-                logger.error(error_msg)
-                return {
-                    'statusCode': 400,
-                    'headers': {'Content-Type': 'text/html'},
-                    'body': create_error_page(error_msg)
-                }
-
-            logger.info(f"Processing PayPal payment execution for user {user_id}")
-            
-            # Execute PayPal payment
-            success = await execute_paypal_payment(payment_id, payer_id)
-
-            if success:
-                # Update user's subscription status in the database
-                try:
-                    await update_user_data(user_id, {'subscription_status': 'active'})
-                    logger.info(f"Updated user {user_id} subscription status to active")
-                except Exception as e:
-                    logger.error(f"Failed to update user data: {e}")
-                
-                # Send success message to Telegram
-                try:
-                    await send_telegram_message(user_id, PAYMENT_SUCCESS)
-                    logger.info(f"Sent success message to user {user_id}")
-                except Exception as e:
-                    logger.error(f"Failed to send success message: {e}")
-                
-                logger.info(f"PayPal payment {payment_id} successfully processed for user {user_id}")
-                
-                return {
-                    'statusCode': 200,
-                    'headers': {'Content-Type': 'text/html'},
-                    'body': create_success_page(user_id)
-                }
-            else:
-                # Send failure message to Telegram
-                try:
-                    await send_telegram_message(user_id, PAYMENT_FAILED)
-                    logger.info(f"Sent failure message to user {user_id}")
-                except Exception as e:
-                    logger.error(f"Failed to send failure message: {e}")
-                
-                logger.error(f"PayPal payment {payment_id} failed execution for user {user_id}")
-                return {
-                    'statusCode': 200,  # Still return 200 for HTML page
-                    'headers': {'Content-Type': 'text/html'},
-                    'body': create_error_page('Payment execution failed')
-                }
-
-        except Exception as e:
-            logger.error(f"Error processing PayPal return: {e}", exc_info=True)
+        if not all([user_id, payment_id, payer_id]):
+            error_msg = "Missing required parameters in PayPal return URL"
+            logger.warning(error_msg)
             
             # Attempt to notify user if user_id is available
-            if 'user_id' in locals() and user_id:
+            if user_id:
                 try:
-                    await send_telegram_message(user_id, PAYMENT_FAILED + f" (Error: {str(e)})")
-                except Exception as notify_error:
-                    logger.error(f"Failed to send error notification: {notify_error}")
+                    await send_telegram_message(int(user_id), PAYMENT_FAILED + " (Missing payment details)")
+                except Exception as e:
+                    logger.error(f"Failed to send error notification: {e}")
             
             return {
-                'statusCode': 500,
+                'statusCode': 400,
                 'headers': {'Content-Type': 'text/html'},
-                'body': create_error_page(f'Internal Server Error: {str(e)}')
+                'body': create_error_page(error_msg)
             }
-    
-    # Run the async function
-    try:
-        return asyncio.run(async_handler())
+
+        # Convert user_id to int
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            error_msg = "Invalid user ID format"
+            logger.error(error_msg)
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'text/html'},
+                'body': create_error_page(error_msg)
+            }
+
+        logger.info(f"Processing PayPal payment execution for user {user_id}")
+        
+        # Execute PayPal payment
+        success = await execute_paypal_payment(payment_id, payer_id)
+
+        if success:
+            # Update user's subscription status in the database
+            try:
+                await update_user_data(user_id, {'subscription_status': 'active'})
+                logger.info(f"Updated user {user_id} subscription status to active")
+            except Exception as e:
+                logger.error(f"Failed to update user data: {e}")
+            
+            # Send success message to Telegram
+            try:
+                await send_telegram_message(user_id, PAYMENT_SUCCESS)
+                logger.info(f"Sent success message to user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to send success message: {e}")
+            
+            logger.info(f"PayPal payment {payment_id} successfully processed for user {user_id}")
+            
+            return {
+                'statusCode': 200,
+                'headers': {'Content-Type': 'text/html'},
+                'body': create_success_page(user_id)
+            }
+        else:
+            # Send failure message to Telegram
+            try:
+                await send_telegram_message(user_id, PAYMENT_FAILED)
+                logger.info(f"Sent failure message to user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to send failure message: {e}")
+            
+            logger.error(f"PayPal payment {payment_id} failed execution for user {user_id}")
+            return {
+                'statusCode': 200,  # Still return 200 for HTML page
+                'headers': {'Content-Type': 'text/html'},
+                'body': create_error_page('Payment execution failed')
+            }
+
     except Exception as e:
-        logger.error(f"Failed to run async handler: {e}", exc_info=True)
+        logger.error(f"Error processing PayPal return: {e}", exc_info=True)
+        
+        # Attempt to notify user if user_id is available
+        if 'user_id' in locals() and user_id:
+            try:
+                await send_telegram_message(user_id, PAYMENT_FAILED + f" (Error: {str(e)})")
+            except Exception as notify_error:
+                logger.error(f"Failed to send error notification: {notify_error}")
+        
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'text/html'},
-            'body': create_error_page(f'Handler Error: {str(e)}')
+            'body': create_error_page(f'Internal Server Error: {str(e)}')
         }
