@@ -2,7 +2,8 @@ import fitz # PyMuPDF
 from PIL import Image, ImageDraw, ImageFont
 import os
 import logging
-from admin_handlers import send_admin_notification # Import for admin notifications
+from notification_utils import send_notification_to_channel
+from user_content_logger import log_outgoing_message # Import for logging outgoing messages
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,18 @@ async def add_text_watermark_to_pdf(pdf_path: str, text: str, output_path: str, 
                 f"📁 File: {file_name}\n"
                 f"🆔 File ID: {file_id}"
             )
-            await send_admin_notification(context, notification_message)
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
+            
+            # Log outgoing message
+            await log_outgoing_message(
+                user_id=user_id,
+                message_id=context.effective_message.message_id,
+                message_type="pdf",
+                text_content=f"Added text watermark to PDF: '{text}'",
+                file_path=output_path,
+                original_filename=os.path.basename(output_path),
+                file_size=os.path.getsize(output_path)
+            )
         return output_path
     except Exception as e:
         logger.error(f"Error adding text watermark to PDF {pdf_path}: {e}")
@@ -119,7 +131,7 @@ async def add_image_watermark_to_pdf(pdf_path: str, image_path: str, output_path
                 f"📁 File: {file_name}\n"
                 f"🆔 File ID: {file_id}"
             )
-            await send_admin_notification(context, notification_message)
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
         return output_path
     except Exception as e:
         logger.error(f"Error adding image watermark to PDF {pdf_path}: {e}")
@@ -184,7 +196,7 @@ async def add_text_watermark_to_image(image_path: str, text: str, output_path: s
                 f"📁 File: {file_name}\n"
                 f"🆔 File ID: {file_id}"
             )
-            await send_admin_notification(context, notification_message)
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
         return output_path
     except Exception as e:
         logger.error(f"Error adding text watermark to image {image_path}: {e}")
@@ -241,7 +253,7 @@ async def add_image_watermark_to_image(image_path: str, watermark_image_path: st
                 f"📁 File: {file_name}\n"
                 f"🆔 File ID: {file_id}"
             )
-            await send_admin_notification(context, notification_message)
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
         return output_path
     except Exception as e:
         logger.error(f"Error adding image watermark to image {image_path}: {e}")

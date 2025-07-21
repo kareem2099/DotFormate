@@ -3,6 +3,7 @@ import os
 import zipfile
 import logging
 from PIL import Image
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -61,17 +62,23 @@ def convert_pdf_to_images(pdf_path: str, page_selection: str, output_format: str
         return []
     return image_paths
 
-def create_zip_archive(file_paths: list, original_file_name: str) -> str:
+def create_zip_archive(file_paths: list, original_file_name: str, output_dir: str) -> str:
     """
     Creates a ZIP archive from a list of file paths.
     Returns the path to the created ZIP file.
+    
+    Args:
+        file_paths: List of paths to files to be included in the zip.
+        original_file_name: The original name of the file (e.g., "document.pdf") to derive the zip name.
+        output_dir: The directory where the zip file should be created.
     """
-    zip_file_name = f"/tmp/{os.path.basename(original_file_name).replace('.pdf', '')}_converted.zip"
+    zip_file_name = f"{Path(original_file_name).stem}_converted.zip"
+    zip_file_path = os.path.join(output_dir, zip_file_name)
     try:
-        with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for file_path in file_paths:
                 zipf.write(file_path, os.path.basename(file_path))
-        return zip_file_name
+        return zip_file_path
     except Exception as e:
         logger.error(f"Error creating ZIP archive: {e}")
         return ""

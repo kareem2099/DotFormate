@@ -42,12 +42,15 @@ async def paypal_return_handler():
     logger.info(f"Request URL: {request.url}")
     
     user_id = None # Initialize user_id to None
+    chat_id = None # Initialize chat_id to None
     try:
         # Extract parameters from the URL
         user_id_from_url = request.args.get('user_id')
         paymentId = request.args.get('paymentId')
         token = request.args.get('token')
         PayerID = request.args.get('PayerID')
+
+        logger.info(f"Received PayPal return parameters: user_id={user_id_from_url}, paymentId={paymentId}, token={token}, PayerID={PayerID}")
 
         if not all([user_id_from_url, paymentId, token, PayerID]):
             logger.warning("Missing required PayPal return parameters.")
@@ -72,7 +75,7 @@ async def paypal_return_handler():
                 return jsonify({'status': 'error', 'message': 'User chat ID not found.'}), 500
 
         # Introduce a small delay to allow PayPal's systems to propagate the payment status
-        await asyncio.sleep(2) # Wait for 2 seconds
+        await asyncio.sleep(5) # Increased wait time to 5 seconds
 
         # Execute the PayPal payment
         success, error_details = await execute_paypal_payment(paymentId, PayerID)
@@ -102,7 +105,7 @@ async def paypal_return_handler():
     except Exception as e:
         logger.error(f"Error processing PayPal return: {e}", exc_info=True)
         # Use the determined chat_id if available, otherwise try user_id from URL
-        final_chat_id = chat_id if 'chat_id' in locals() and chat_id else (int(user_id_from_url) if 'user_id_from_url' in locals() and user_id_from_url else None)
+        final_chat_id = chat_id if chat_id else (int(user_id_from_url) if user_id_from_url else None)
         if final_chat_id:
             await send_telegram_message(final_chat_id, PAYMENT_FAILED + f" (Internal Error: {e})")
         return jsonify({'status': 'error', 'message': f'Internal Server Error: {e}'}), 500

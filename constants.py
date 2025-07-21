@@ -10,12 +10,29 @@ PAYMENT_FAILED = "❌ Payment failed. Please try again or contact support."
 PAYMENT_PENDING = "⏳ Your payment is pending. We will notify you once it's confirmed."
 
 # Payment Options
+# Maximum file sizes for free users (in MB)
+MAX_FREE_IMAGE_SIZE_MB = 10
+MAX_FREE_PDF_SIZE_MB = 25
+MAX_FREE_WORD_SIZE_MB = 15
+MAX_FREE_PPT_SIZE_MB = 30
+
+# Daily conversion limits for free users
+MAX_FREE_DAILY_CONVERSIONS = 5 # Example limit
+
+# Maximum file sizes for premium users before R2 upload (in MB)
+# Files exceeding these limits for premium users will be uploaded to R2
+MAX_PREMIUM_IMAGE_SIZE_MB = 50
+MAX_PREMIUM_PDF_SIZE_MB = 100
+MAX_PREMIUM_WORD_SIZE_MB = 75
+MAX_PREMIUM_PPT_SIZE_MB = 150
+
+# Payment Options
 PAYMENT_OPTIONS = {
-    "week": {"amount": "0.10", "description": "Weekly Subscription"},
-    "month": {"amount": "15.00", "description": "Monthly Subscription"},
-    "half_year": {"amount": "60.00", "description": "Half-Yearly Subscription"},
-    "year": {"amount": "150.00", "description": "Yearly Subscription"},
-    "source_code": {"amount": "270.00", "description": "Source Code Access"}
+    "week": {"amount": "7.00", "description": "Weekly Subscription", "type": "weekly"},
+    "month": {"amount": "15.00", "description": "Monthly Subscription", "type": "monthly"},
+    "half_year": {"amount": "60.00", "description": "Half-Yearly Subscription", "type": "half_yearly"},
+    "year": {"amount": "150.00", "description": "Yearly Subscription", "type": "yearly"},
+    "source_code": {"amount": "270.00", "description": "Source Code Access", "type": "lifetime"} # Assuming source code access is a lifetime premium
 }
 
 # Payment Methods

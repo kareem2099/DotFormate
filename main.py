@@ -42,7 +42,7 @@ from conversation_handlers import (
     handle_watermark_text_input, handle_watermark_image_input, handle_watermark_position_input,
     url_conversion_flow_start, handle_url_input
 )
-from admin_handlers import send_admin_notification, is_admin # Import centralized is_admin
+from admin_handlers import is_admin # Keep is_admin if still used, remove send_admin_notification
 from menu_handlers import (
     pdf_conversions_menu, png_conversions_menu, jpg_conversions_menu,
     webp_conversions_menu, tiff_conversions_menu, docx_conversions_menu, pptx_conversions_menu, handle_menu_callbacks,
@@ -52,12 +52,62 @@ from menu_handlers import (
 )
 from commands import ( # Import all command handlers from commands.py
     set_bot_commands, admin_command_example,
-    handle_users_command, handle_logs_command, handle_backup_command, handle_maintenance_command
+    handle_users_command, handle_logs_command, handle_backup_command, handle_maintenance_command, handle_pending_payments_command
 )
 
 # Import document converters
 from docx_converter import handle_docx_to_pdf, handle_pdf_to_docx
 from pptx_converter import handle_pptx_to_pdf, handle_pdf_to_pptx
+from r2_utils import delete_file_from_r2
+from database import get_old_r2_files, mark_r2_file_as_deleted
+from datetime import datetime, timedelta
+from notification_utils import send_notification_to_channel # Import for notifications
+import traceback # Import traceback for detailed error logging
+
+
+async def daily_r2_cleanup_job(context: CallbackContext):
+    """
+    Job function to periodically clean up old files from R2 storage.
+    It queries the database for files older than 1 week and deletes them from R2.
+    """
+    logger.info("Starting daily R2 cleanup job.")
+    
+    # Define cutoff time (e.g., 1 week ago)
+    cutoff_time = datetime.utcnow() - timedelta(weeks=1)
+    
+    files_to_delete_metadata = await get_old_r2_files(cutoff_time)
+    
+    if not files_to_delete_metadata:
+        logger.info("No old R2 files found for cleanup.")
+        return
+
+    logger.info(f"Found {len(files_to_delete_metadata)} old R2 files to delete.")
+    
+    for file_meta in files_to_delete_metadata:
+        r2_object_key = file_meta['r2_object_key']
+        user_id = file_meta['user_id']
+        
+        success, error_message = delete_file_from_r2(r2_object_key)
+        
+        if success:
+            await mark_r2_file_as_deleted(r2_object_key)
+            logger.info(f"Successfully deleted R2 object '{r2_object_key}' and marked in DB for user {user_id}.")
+            # Optionally, notify the user that their file has been deleted
+            # try:
+            #     await context.bot.send_message(chat_id=user_id, text=f"Your file '{r2_object_key.split('/')[-1]}' has been removed from storage as per our 1-week policy.")
+            # except Exception as e:
+            #     logger.warning(f"Could not send R2 cleanup notification to user {user_id}: {e}")
+        else:
+            logger.error(f"Failed to delete R2 object '{r2_object_key}': {error_message}")
+            # Notify about persistent deletion failures
+            notification_message = (
+                f"⚠️ *R2 Cleanup Failure!* ⚠️\n\n"
+                f"🚨 Failed to delete R2 object: `{r2_object_key}`\n"
+                f"Error: {error_message}"
+            )
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
+
+    logger.info("R2 cleanup job finished.")
 
 
 async def start_command_handler(update: Update, context: CallbackContext) -> int:
@@ -84,6 +134,9 @@ def main():
     logger.info("Building Telegram Application...")
     application = Application.builder().token(telegram_bot_token).build()
     logger.info("Telegram Application built successfully.")
+
+    # Add the error handler
+    application.add_error_handler(error_handler)
 
     # Add command handlers
     application.add_handler(CommandHandler("help", help_command))
@@ -112,6 +165,7 @@ def main():
     application.add_handler(CommandHandler("logs", handle_logs_command, filters=admin_filter))
     application.add_handler(CommandHandler("backup", handle_backup_command, filters=admin_filter))
     application.add_handler(CommandHandler("maintenance", handle_maintenance_command, filters=admin_filter))
+    application.add_handler(CommandHandler("pendingpayments", handle_pending_payments_command, filters=admin_filter)) # New admin command
     application.add_handler(CommandHandler("cancel", cancel)) # Global cancel command
     
     # Add conversation handler for file processing
@@ -205,12 +259,48 @@ def main():
         data=application
     )
 
+    # Schedule daily R2 cleanup job
+    # Run daily at a specific time, e.g., 03:00 AM UTC
+    application.job_queue.run_daily(
+        daily_r2_cleanup_job,
+        time=datetime.strptime('03:00', '%H:%M').time(),
+        days=(0, 1, 2, 3, 4, 5, 6), # Every day of the week
+        name='Daily R2 Cleanup'
+    )
+    logger.info("Scheduled daily R2 cleanup job for 03:00 AM UTC.")
+
     # Run the bot until you press Ctrl-C or the process receives SIGINT,
     # SIGTERM or SIGABRT. This should be used most of the time, since
     # start_polling() is non-blocking and will stop the bot gracefully.
     logger.info("Starting bot polling. Press Ctrl-C to stop.")
     application.run_polling()
     logger.info("Bot polling stopped gracefully.")
+
+async def error_handler(update: object, context: CallbackContext) -> None:
+    """Log the error and send a telegram message to notify the admin."""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+
+    # traceback.format_exception returns a list of strings, we join them here.
+    tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
+    tb_string = "".join(tb_list)
+
+    # Build the message with as much information as possible
+    message = (
+        f"🔥 *An error occurred!* 🔥\n\n"
+        f"🚨 *Error:* `{context.error}`\n\n"
+        f"⚡️ *Update:* `{update}`\n\n"
+        f"```python\n{tb_string[:1000]}...\n```" # Limit traceback to 1000 chars
+    )
+    
+    # Send notification to the channel
+    await send_notification_to_channel(message, parse_mode='Markdown')
+
+    # Optionally, notify the user who caused the error
+    if update and update.effective_message:
+        await update.effective_message.reply_text(
+            "Oops! Something went wrong while processing your request. "
+            "Our team has been notified and is looking into it. Please try again later! 💔"
+        )
 
 if __name__ == '__main__':
     main()

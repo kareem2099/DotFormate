@@ -10,3 +10,5 @@ PyMuPDF
 Pillow
 pytesseract
 pdf2pptx
+boto3
+motor

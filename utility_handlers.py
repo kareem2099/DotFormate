@@ -3,19 +3,20 @@ from datetime import datetime # Import datetime for timestamp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from database import save_user_info, get_user # Import get_user
-from admin_handlers import send_admin_notification # Import for admin notifications
 from constants import MAIN_MENU
+from notification_utils import send_notification_to_channel
+from user_content_logger import log_incoming_message # Import the new user content logger
 
 logger = logging.getLogger(__name__)
 
 async def send_or_edit_message(update: Update, text: str, reply_markup: InlineKeyboardMarkup = None, parse_mode: str = None):
-    """Sends a new message or edits an existing one based on the update type."""
+    """Sends a new message or edits an existing one based on the update type, returning the sent/edited message."""
     if update.callback_query:
         query = update.callback_query
         await query.answer()
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        return await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 async def start(update: Update, context: CallbackContext) -> int:
     """Send a welcome message and main menu when the command /start is issued or 'Back to Main Menu' is selected."""
@@ -36,7 +37,7 @@ async def start(update: Update, context: CallbackContext) -> int:
             f"@{user.username or 'N/A'}\n"
             f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}"
         )
-        await send_admin_notification(context, notification_message, level="INFO")
+        await send_notification_to_channel(notification_message, parse_mode='Markdown')
         logger.info(f"New user notification sent for user ID: {user.id}")
 
     keyboard = [
@@ -85,31 +86,72 @@ async def cancel(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 async def _get_file_info_from_update(update: Update, context: CallbackContext):
-    """Helper function to extract file info from update or user_data."""
+    """Helper function to extract file info (id, name, mime_type, size) from update or user_data."""
     file_id = None
     file_name = None
     mime_type = None
+    file_size = None # Initialize file_size
+    user_id = update.effective_user.id
+    message_id = update.effective_message.message_id
+    text_content = update.effective_message.text
 
     # Prioritize newly uploaded files from the message
     if update.message and update.message.document:
         file_id = update.message.document.file_id
         file_name = update.message.document.file_name
         mime_type = update.message.document.mime_type
-        logger.info(f"Processing newly uploaded document: {file_name}, MIME type: {mime_type}")
+        file_size = update.message.document.file_size # Get file size for documents
+        logger.info(f"Processing newly uploaded document: {file_name}, MIME type: {mime_type}, Size: {file_size} bytes")
+        await log_incoming_message(
+            user_id=user_id,
+            message_id=message_id,
+            message_type="document",
+            text_content=text_content,
+            file_id=file_id,
+            file_size=file_size,
+            file_name=file_name,
+            context=context
+        )
     elif update.message and update.message.photo:
-        file_id = update.message.photo[-1].file_id
-        file_name = f"image_{file_id}.jpg" # Assuming JPG for photos
+        # For photos, Telegram sends multiple sizes; pick the largest one
+        largest_photo = update.message.photo[-1]
+        file_id = largest_photo.file_id
+        file_name = f"image_{file_id}.jpeg" # Assuming JPEG for photos, can be adjusted
         mime_type = "image/jpeg"
-        logger.info(f"Processing newly uploaded photo: {file_name}, MIME type: {mime_type}")
+        file_size = largest_photo.file_size # Get file size for photos
+        logger.info(f"Processing newly uploaded photo: {file_name}, MIME type: {mime_type}, Size: {file_size} bytes")
+        await log_incoming_message(
+            user_id=user_id,
+            message_id=message_id,
+            message_type="photo",
+            text_content=text_content,
+            file_id=file_id,
+            file_size=file_size,
+            file_name=file_name,
+            context=context
+        )
+    elif update.message and update.message.text:
+        logger.info(f"Processing incoming text message from user {user_id}: {text_content}")
+        await log_incoming_message(
+            user_id=user_id,
+            message_id=message_id,
+            message_type="text",
+            text_content=text_content
+        )
     elif 'uploaded_file_info' in context.user_data:
         # If no new file in message, check for pre-uploaded file info in user_data
         uploaded_file_info = context.user_data['uploaded_file_info']
         file_id = uploaded_file_info['file_id']
         file_name = uploaded_file_info['file_name']
         mime_type = uploaded_file_info['mime_type']
-        logger.info(f"Processing pre-stored file from user_data: {file_name}, MIME type: {mime_type}")
+        file_size = uploaded_file_info.get('file_size') # Retrieve file size if present
+        logger.info(f"Processing pre-stored file from user_data: {file_name}, MIME type: {mime_type}, Size: {file_size} bytes")
+        # Note: For pre-stored files, they are typically already handled by the initial upload handler.
+        # We might not need to log them again here as "incoming" if they were already logged when first received.
+        # This part depends on the exact flow of your bot. For now, I'll assume this is a re-processing step
+        # and won't log it as a new incoming message to avoid duplicates.
     
-    return file_id, file_name, mime_type
+    return file_id, file_name, mime_type, file_size
 
 async def balance_command(update: Update, context: CallbackContext) -> None:
     """Handles the /balance command, showing the user's referral balance."""

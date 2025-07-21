@@ -7,7 +7,7 @@ from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler, filters
 import fitz # Import fitz for PDF processing
-from database import save_user_info
+from database import save_user_info, increment_daily_conversion_count
 from admin_handlers import send_admin_notification
 from ocr_tool import perform_ocr as process_ocr
 from pdf_converter import merge_pdfs, split_pdf, compress_pdf, compress_image
@@ -19,6 +19,8 @@ from watermark_tool import (
 )
 from url_downloader import download_file_from_url
 from utility_handlers import start, help_command, cancel, send_or_edit_message # Import centralized utilities
+from r2_utils import upload_file_to_r2, download_file_from_r2
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,9 @@ from constants import (
     MAIN_MENU, SELECT_CONVERSION_TYPE, SELECT_PAGES, SELECT_OUTPUT_FORMAT, SELECT_IMAGE_FORMAT,
     OCR_PROCESSING, MERGE_PDF_COLLECTION, SPLIT_PDF_INPUT_PAGES, COMPRESSION_PROCESSING,
     WATERMARK_FILE_INPUT, WATERMARK_TEXT_INPUT, WATERMARK_IMAGE_INPUT, WATERMARK_POSITION_INPUT,
-    URL_INPUT, COMPRESS_FILE_PROCESSING
+    URL_INPUT, COMPRESS_FILE_PROCESSING, MAX_FREE_DAILY_CONVERSIONS # Import new constant
 )
+from database import get_user_premium_status, get_daily_conversion_count # Import new functions
 
 # Specialized flow starters
 async def ocr_flow_start(update: Update, context: CallbackContext) -> int:
@@ -93,34 +96,34 @@ async def url_conversion_flow_start(update: Update, context: CallbackContext) ->
 # Document handlers
 async def handle_ocr_document(update: Update, context: CallbackContext) -> int:
     """Handles OCR processing of documents."""
+    user_id = update.effective_user.id
     temp_dir = None
-    file_id = None
-    file_name = None
-    mime_type = None
+    
+    uploaded_file_info = context.user_data.pop('uploaded_file_info', None)
+    if not uploaded_file_info or 'r2_object_key' not in uploaded_file_info:
+        await send_or_edit_message(update, "Error: File information or R2 key missing. Please try uploading your file again.")
+        return ConversationHandler.END
+
+    file_id = uploaded_file_info['file_id']
+    file_name = uploaded_file_info['file_name']
+    mime_type = uploaded_file_info['mime_type']
+    r2_object_key = uploaded_file_info['r2_object_key']
+
+    if not (mime_type == 'application/pdf' or mime_type.startswith('image/')):
+        await send_or_edit_message(update, "Sorry, I can only perform OCR on images and PDFs.")
+        return ConversationHandler.END
+
+    await send_or_edit_message(update, "🔍 Performing OCR on your file... This might take a moment.")
 
     try:
-        document = update.message.document
-        photo = update.message.photo
-        
-        if document:
-            file_id = document.file_id
-            file_name = document.file_name
-            mime_type = document.mime_type
-        elif photo:
-            # Get the largest photo size
-            file_id = photo[-1].file_id
-            file_name = f"photo_{file_id}.jpg" # Assign a generic name for photos
-            mime_type = "image/jpeg" # Assume JPEG for simplicity, can be refined
-
-        if not file_id:
-            await send_or_edit_message(update, "Please send an image or PDF file for OCR.")
-            return ConversationHandler.END
-
-        await send_or_edit_message(update, "🔍 Performing OCR on your file... This might take a moment.")
-
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file_name)
-        await context.bot.get_file(file_id).download_to_drive(input_path)
+        
+        success, error_message = await download_file_from_r2(r2_object_key, input_path)
+        if not success:
+            logger.error(f"Error downloading file from R2 for OCR: {error_message}")
+            await send_or_edit_message(update, f"Uh oh! 😟 I couldn't access your file from storage: {error_message}. Please try again.")
+            return ConversationHandler.END
 
         extracted_text = ""
         if mime_type == 'application/pdf':
@@ -140,21 +143,20 @@ async def handle_ocr_document(update: Update, context: CallbackContext) -> int:
                 os.remove(img_path) # Clean up page images
         elif mime_type.startswith('image/'):
             extracted_text = process_ocr(input_path)
-        else:
-            await send_or_edit_message(update, "Sorry, I can only perform OCR on images and PDFs.")
-            return ConversationHandler.END
-
+        
         if extracted_text.strip():
             await send_or_edit_message(update, f"📝 *OCR Result:*\n\n```\n{extracted_text.strip()}\n```", parse_mode='Markdown')
             user = update.effective_user
             notification_message = (
                 f"✅ OCR Conversion Completed ✅\n\n"
                 f"👤 User: {user.full_name} (ID: {user.id})\n"
-                f"📁 File: {file_name}\n"
-                f"🆔 File ID: {file_id}"
+                f"📁 Original File: {file_name}\n"
+                f"🆔 Original File ID: {file_id}\n"
+                f"☁️ Original R2 Key: {r2_object_key}"
             )
             await send_admin_notification(context, notification_message)
             await send_or_edit_message(update, "🎉 Success! Text extracted and sent!")
+            await increment_daily_conversion_count(user_id)
         else:
             await send_or_edit_message(update, "😔 No text could be extracted from the file. Please try with a clearer image or PDF.")
         
@@ -165,8 +167,6 @@ async def handle_ocr_document(update: Update, context: CallbackContext) -> int:
         await send_or_edit_message(update, f"An error occurred during OCR: {e} 💔 Please try again.")
         return ConversationHandler.END
     finally:
-        if file_id and input_path and os.path.exists(input_path):
-            os.remove(input_path)
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
@@ -175,108 +175,144 @@ async def handle_ocr_document(update: Update, context: CallbackContext) -> int:
 
 async def handle_merge_pdf_documents(update: Update, context: CallbackContext) -> int:
     """Handles PDF merging process."""
+    user_id = update.effective_user.id
     user_data = context.user_data
     
-    if 'pdf_paths_to_merge' not in user_data:
-        user_data['pdf_paths_to_merge'] = []
+    if 'pdf_r2_keys_to_merge' not in user_data:
+        user_data['pdf_r2_keys_to_merge'] = []
         user_data['pdf_names_to_merge'] = []
-        user_data['temp_dirs_to_clean'] = [] # To keep track of temp directories for cleanup
 
-    document = update.message.document
-    if not document or document.mime_type != 'application/pdf':
-        if update.message.text and update.message.text.lower() == 'done':
-            if not user_data['pdf_paths_to_merge']:
-                await send_or_edit_message(update, "Please send at least one PDF file before typing 'done'.")
-                return MERGE_PDF_COLLECTION
-            
-            await send_or_edit_message(update, "Merging your PDFs... This might take a moment. ⏳")
-            merged_pdf_path = None
-            try:
-                merged_pdf_path = merge_pdfs(user_data['pdf_paths_to_merge'])
-                
-                if merged_pdf_path and os.path.exists(merged_pdf_path):
-                    merged_file_name = f"merged_pdfs_{update.effective_user.id}.pdf"
-                    with open(merged_pdf_path, 'rb') as f:
-                        await context.bot.send_document(
-                            chat_id=update.effective_chat.id,
-                            document=f,
-                            filename=merged_file_name,
-                            caption="🎉 Here's your merged PDF file!"
-                        )
-                    user = update.effective_user
-                    notification_message = (
-                        f"✅ PDF Merge Completed ✅\n\n"
-                        f"👤 User: {user.full_name} (ID: {user.id})\n"
-                        f"📁 Merged Files: {', '.join(user_data['pdf_names_to_merge'])}\n"
-                        f"🆔 Merged File Name: {merged_file_name}" # No file_id for newly created file
-                    )
-                    await send_admin_notification(context, notification_message)
-                    await send_or_edit_message(update, "✨ Your PDFs have been successfully merged and sent!")
-                else:
-                    await send_or_edit_message(update, "😔 Oh no! I couldn't merge your PDFs. Please try again.")
-                
-                return ConversationHandler.END
-            except Exception as e:
-                logger.error(f"Error merging PDFs: {e}")
-                await send_or_edit_message(update, f"An error occurred during PDF merging: {e} 💔 Please try again.")
-                return ConversationHandler.END
-            finally:
-                # Clean up all temporary files and directories
-                if merged_pdf_path and os.path.exists(merged_pdf_path):
-                    os.remove(merged_pdf_path)
-                for path in user_data['pdf_paths_to_merge']:
-                    if os.path.exists(path):
-                        os.remove(path)
-                for temp_dir in user_data['temp_dirs_to_clean']:
-                    if os.path.exists(temp_dir):
-                        try:
-                            shutil.rmtree(temp_dir)
-                        except Exception as e:
-                            logger.warning(f"Could not delete temp directory {temp_dir}: {e}")
-                user_data.pop('pdf_paths_to_merge', None)
-                user_data.pop('pdf_names_to_merge', None)
-                user_data.pop('temp_dirs_to_clean', None)
-        else:
-            await send_or_edit_message(update, "Please send a valid PDF file or type 'done' to merge the collected PDFs.")
+    uploaded_file_info = context.user_data.get('uploaded_file_info', None)
+
+    if update.message.text and update.message.text.lower() == 'done':
+        if not user_data['pdf_r2_keys_to_merge']:
+            await send_or_edit_message(update, "Please send at least one PDF file before typing 'done'.")
             return MERGE_PDF_COLLECTION
+        
+        await send_or_edit_message(update, "Merging your PDFs... This might take a moment. ⏳")
+        temp_dir = None
+        merged_pdf_path = None
+        try:
+            temp_dir = tempfile.mkdtemp()
+            local_pdf_paths = []
+            for r2_key, file_name in zip(user_data['pdf_r2_keys_to_merge'], user_data['pdf_names_to_merge']):
+                local_path = os.path.join(temp_dir, file_name)
+                success, error_message = await download_file_from_r2(r2_key, local_path)
+                if not success:
+                    logger.error(f"Error downloading PDF from R2 for merging: {error_message}")
+                    await send_or_edit_message(update, f"Uh oh! 😟 I couldn't access one of your PDFs from storage: {error_message}. Please try again.")
+                    return ConversationHandler.END
+                local_pdf_paths.append(local_path)
 
-    temp_dir = tempfile.mkdtemp()
-    file_path = os.path.join(temp_dir, document.file_name)
-    await document.get_file().download_to_drive(file_path)
-    
-    user_data['pdf_paths_to_merge'].append(file_path)
-    user_data['pdf_names_to_merge'].append(document.file_name)
-    user_data['temp_dirs_to_clean'].append(temp_dir) # Add this temp dir to cleanup list
-
-    await send_or_edit_message(update, f"Received '{document.file_name}'. Send another PDF or type 'done' to merge.")
-    return MERGE_PDF_COLLECTION
+            merged_pdf_path = merge_pdfs(local_pdf_paths)
+            
+            if merged_pdf_path and os.path.exists(merged_pdf_path):
+                merged_file_name = f"merged_pdfs_{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+                output_r2_key = f"{user_id}/converted/{merged_file_name}"
+                public_url, error = upload_file_to_r2(merged_pdf_path, output_r2_key)
+                
+                if error:
+                    logger.error(f"Error uploading merged PDF to R2: {error}")
+                    await send_or_edit_message(update, f"Failed to upload merged file to storage: {error}. Please try again.")
+                    return ConversationHandler.END
+                
+                user = update.effective_user
+                notification_message = (
+                    f"✅ PDF Merge Completed ✅\n\n"
+                    f"👤 User: {user.full_name} (ID: {user.id})\n"
+                    f"📁 Merged Files: {', '.join(user_data['pdf_names_to_merge'])}\n"
+                    f"🔗 Merged File URL: {public_url}"
+                )
+                await send_admin_notification(context, notification_message)
+                await send_or_edit_message(update, f"🎉 Here's your merged PDF file: {public_url}")
+                await increment_daily_conversion_count(user_id)
+            else:
+                await send_or_edit_message(update, "😔 Oh no! I couldn't merge your PDFs. Please try again.")
+            
+            return ConversationHandler.END
+        except Exception as e:
+            logger.error(f"Error merging PDFs: {e}")
+            await send_or_edit_message(update, f"An error occurred during PDF merging: {e} 💔 Please try again.")
+            return ConversationHandler.END
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception as e:
+                    logger.warning(f"Could not delete temp directory {temp_dir}: {e}")
+            user_data.pop('pdf_r2_keys_to_merge', None)
+            user_data.pop('pdf_names_to_merge', None)
+            context.user_data.pop('uploaded_file_info', None) # Clear any lingering uploaded_file_info
+    elif uploaded_file_info and uploaded_file_info['mime_type'] == 'application/pdf':
+        user_data['pdf_r2_keys_to_merge'].append(uploaded_file_info['r2_object_key'])
+        user_data['pdf_names_to_merge'].append(uploaded_file_info['file_name'])
+        await send_or_edit_message(update, f"Received '{uploaded_file_info['file_name']}'. Send another PDF or type 'done' to merge.")
+        context.user_data.pop('uploaded_file_info', None) # Consume the uploaded_file_info
+        return MERGE_PDF_COLLECTION
+    else:
+        await send_or_edit_message(update, "Please send a valid PDF file or type 'done' to merge the collected PDFs.")
+        return MERGE_PDF_COLLECTION
 
 async def handle_split_pdf_document(update: Update, context: CallbackContext) -> int:
     """Handles PDF splitting process."""
-    # Implementation would go here
-    pass
+    user_id = update.effective_user.id
+    uploaded_file_info = context.user_data.pop('uploaded_file_info', None)
+    if not uploaded_file_info or 'r2_object_key' not in uploaded_file_info:
+        await send_or_edit_message(update, "Error: File information or R2 key missing. Please try uploading your file again.")
+        return ConversationHandler.END
+
+    file_id = uploaded_file_info['file_id']
+    file_name = uploaded_file_info['file_name']
+    mime_type = uploaded_file_info['mime_type']
+    r2_object_key = uploaded_file_info['r2_object_key']
+
+    if mime_type != 'application/pdf':
+        await send_or_edit_message(update, "Oops! That doesn't look like a PDF. Please send a valid PDF file for splitting. 📄")
+        return ConversationHandler.END
+
+    context.user_data['pdf_r2_object_key'] = r2_object_key
+    context.user_data['pdf_file_name'] = file_name
+    context.user_data['pdf_file_id'] = file_id # Store for notification
+
+    await send_or_edit_message(update,
+        "Great! Please tell me which page numbers or ranges you'd like to split (e.g., '1-3', '5', '1,3,5-7'). "
+        "You can also type /cancel if you change your mind. ↩️"
+    )
+    return SPLIT_PDF_INPUT_PAGES
 
 async def handle_split_pages_input(update: Update, context: CallbackContext) -> int:
     """Handles user input for PDF page ranges to split."""
+    user_id = update.effective_user.id
     page_selection_text = update.message.text.lower()
     if page_selection_text == '/cancel':
         return await cancel(update, context)
 
     context.user_data['page_selection'] = page_selection_text
     
+    temp_dir = None
+    downloaded_pdf_path = None
     try:
-        pdf_path = context.user_data.get('pdf_path')
-        if not pdf_path:
-            await send_or_edit_message(update,
-            "⚠️ *Oops!* PDF file not found.\n\n"
-            "Please start over by sending me a valid PDF file first. "
-            "You can use /start to begin again.\n\n"
-            "Need help? Try /help for guidance. 📚",
-            parse_mode='Markdown'
-        )
+        r2_object_key = context.user_data.get('pdf_r2_object_key')
+        pdf_file_name = context.user_data.get('pdf_file_name')
+
+        if not r2_object_key:
+            await send_or_edit_message(update, "⚠️ *Oops!* PDF file not found in storage.\n\n"
+                                                "Please start over by sending me a valid PDF file first. "
+                                                "You can use /start to begin again.\n\n"
+                                                "Need help? Try /help for guidance. 📚",
+                                                parse_mode='Markdown')
             return ConversationHandler.END
 
-        split_pdf_paths = split_pdf(pdf_path, page_selection_text)
+        temp_dir = tempfile.mkdtemp()
+        downloaded_pdf_path = os.path.join(temp_dir, pdf_file_name)
+        
+        success, error_message = await download_file_from_r2(r2_object_key, downloaded_pdf_path)
+        if not success:
+            logger.error(f"Error downloading PDF from R2 for splitting: {error_message}")
+            await send_or_edit_message(update, f"Uh oh! 😟 I couldn't access your PDF from storage: {error_message}. Please try again.")
+            return ConversationHandler.END
+
+        split_pdf_paths = split_pdf(downloaded_pdf_path, page_selection_text)
         if not split_pdf_paths:
             await send_or_edit_message(update,
             "❌ *Failed to split PDF*\n\n"
@@ -293,21 +329,27 @@ async def handle_split_pages_input(update: Update, context: CallbackContext) -> 
         )
             return ConversationHandler.END
 
+        output_r2_urls = []
         for i, split_path in enumerate(split_pdf_paths):
-            with open(split_path, 'rb') as f:
-                await context.bot.send_document(
-                    chat_id=update.effective_chat.id,
-                    document=f,
-                    caption=f"Split PDF part {i+1}"
-                )
-            os.remove(split_path)
+            output_file_name = f"{Path(pdf_file_name).stem}_split_{i+1}.pdf"
+            output_r2_key = f"{user_id}/converted/{datetime.now().strftime('%Y%m%d%H%M%S')}_{output_file_name}"
+            public_url, error = upload_file_to_r2(split_path, output_r2_key)
+            if error:
+                logger.error(f"Error uploading split PDF to R2: {error}")
+                await send_or_edit_message(update, f"Failed to upload split PDF to storage: {error}. Please try again.")
+                return ConversationHandler.END
+            output_r2_urls.append(public_url)
+            await send_or_edit_message(update, f"Split PDF part {i+1}: {public_url}")
+            os.remove(split_path) # Clean up local split file
 
         user = update.effective_user
         notification_message = (
             f"✅ PDF Split Completed ✅\n\n"
             f"👤 User: {user.full_name} (ID: {user.id})\n"
-            f"📁 File: {context.user_data.get('pdf_file_name', 'N/A')}\n" # Assuming pdf_file_name is stored
-            f"🆔 File ID: {context.user_data.get('pdf_file_id', 'N/A')}" # Assuming pdf_file_id is stored
+            f"📁 Original File: {context.user_data.get('pdf_file_name', 'N/A')}\n"
+            f"🆔 Original File ID: {context.user_data.get('pdf_file_id', 'N/A')}\n"
+            f"☁️ Original R2 Key: {r2_object_key}\n"
+            f"🔗 Split File URLs: {', '.join(output_r2_urls)}"
         )
         await send_admin_notification(context, notification_message)
         await send_or_edit_message(update,
@@ -318,6 +360,7 @@ async def handle_split_pages_input(update: Update, context: CallbackContext) -> 
             "• /start - See all options\n\n"
             "Happy converting! 😊"
         )
+        await increment_daily_conversion_count(user_id)
         return ConversationHandler.END
 
     except Exception as e:
@@ -331,72 +374,97 @@ async def handle_split_pages_input(update: Update, context: CallbackContext) -> 
         )
         return ConversationHandler.END
     finally:
-        if 'pdf_path' in context.user_data and context.user_data['pdf_path'] and os.path.exists(context.user_data['pdf_path']):
-            os.remove(context.user_data['pdf_path'])
-            del context.user_data['pdf_path'] # Clean up user_data
+        if downloaded_pdf_path and os.path.exists(downloaded_pdf_path):
+            os.remove(downloaded_pdf_path)
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.warning(f"Could not delete temp directory {temp_dir}: {e}")
+        context.user_data.pop('pdf_r2_object_key', None)
+        context.user_data.pop('pdf_file_name', None)
+        context.user_data.pop('pdf_file_id', None)
+        context.user_data.pop('page_selection', None)
 
 async def handle_compression_document(update: Update, context: CallbackContext) -> int:
     """Handles file compression process."""
+    user_id = update.effective_user.id
     temp_dir = None
+    
+    uploaded_file_info = context.user_data.pop('uploaded_file_info', None)
+    if not uploaded_file_info or 'r2_object_key' not in uploaded_file_info:
+        await send_or_edit_message(update, "Error: File information or R2 key missing. Please try uploading your file again.")
+        return ConversationHandler.END
+
+    file_id = uploaded_file_info['file_id']
+    file_name = uploaded_file_info['file_name']
+    mime_type = uploaded_file_info['mime_type']
+    r2_object_key = uploaded_file_info['r2_object_key']
+
+    if not (mime_type == 'application/pdf' or mime_type.startswith('image/') or \
+            mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' or \
+            mime_type == 'application/vnd.openxmlformats-officedocument.presentationml.presentation'):
+        await send_or_edit_message(update, "Sorry, I can only compress PDFs, images, Word, and PowerPoint files.")
+        return ConversationHandler.END
+
     try:
-        document = update.message.document
-        if not document:
-            await send_or_edit_message(update, "Please send a document to compress.")
-            return ConversationHandler.END
-
-        file_id = document.file_id
-        file_name = document.file_name
-        mime_type = document.mime_type
-
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file_name)
-        await context.bot.get_file(file_id).download_to_drive(input_path)
+        
+        success, error_message = await download_file_from_r2(r2_object_key, input_path)
+        if not success:
+            logger.error(f"Error downloading file from R2 for compression: {error_message}")
+            await send_or_edit_message(update, f"Uh oh! 😟 I couldn't access your file from storage: {error_message}. Please try again.")
+            return ConversationHandler.END
 
         output_path = None
         if mime_type == 'application/pdf':
-            output_path = compress_pdf(input_path)
+            output_path = compress_pdf(input_path, None) # Pass None for output_path to let function generate it
         elif mime_type.startswith('image/'):
-            output_path = compress_image(input_path)
+            output_path = compress_image(input_path, None) # Pass None for output_path to let function generate it
         elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
             # Convert DOCX to PDF, then compress PDF
             pdf_path = os.path.join(temp_dir, Path(input_path).stem + '.pdf')
-            subprocess.run(f"libreoffice --headless --convert-to pdf --outdir {temp_dir} {input_path}", shell=True, check=True)
+            cmd = ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", temp_dir, input_path]
+            subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
             if os.path.exists(pdf_path):
-                compressed_pdf_path = compress_pdf(pdf_path)
-                # For now, we'll send the compressed PDF. If the user wants DOCX back,
-                # we'd need to convert PDF back to DOCX, which might lose formatting.
+                compressed_pdf_path = compress_pdf(pdf_path, None)
                 output_path = compressed_pdf_path
             else:
                 raise Exception("Failed to convert DOCX to PDF for compression.")
         elif mime_type == 'application/vnd.openxmlformats-officedocument.presentationml.presentation':
             # Convert PPTX to PDF, then compress PDF
             pdf_path = os.path.join(temp_dir, Path(input_path).stem + '.pdf')
-            subprocess.run(f"libreoffice --headless --convert-to pdf --outdir {temp_dir} {input_path}", shell=True, check=True)
+            cmd = ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", temp_dir, input_path]
+            subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
             if os.path.exists(pdf_path):
-                compressed_pdf_path = compress_pdf(pdf_path)
+                compressed_pdf_path = compress_pdf(pdf_path, None)
                 output_path = compressed_pdf_path
             else:
                 raise Exception("Failed to convert PPTX to PDF for compression.")
-        else:
-            await send_or_edit_message(update, "Sorry, I can only compress PDFs, images, Word, and PowerPoint files.")
-            return ConversationHandler.END
-
+        
         if output_path and os.path.exists(output_path):
-            with open(output_path, 'rb') as f:
-                await context.bot.send_document(
-                    chat_id=update.effective_chat.id,
-                    document=f,
-                    caption=f"Here's your compressed file ({Path(output_path).suffix})!"
-                )
+            output_file_name = Path(output_path).name
+            output_r2_key = f"{user_id}/converted/{datetime.now().strftime('%Y%m%d%H%M%S')}_{output_file_name}"
+            public_url, error = upload_file_to_r2(output_path, output_r2_key)
+            
+            if error:
+                logger.error(f"Error uploading compressed file to R2: {error}")
+                await send_or_edit_message(update, f"Failed to upload compressed file to storage: {error}. Please try again.")
+                return ConversationHandler.END
+            
             user = update.effective_user
             notification_message = (
                 f"✅ File Compression Completed ✅\n\n"
                 f"👤 User: {user.full_name} (ID: {user.id})\n"
-                f"📁 File: {file_name}\n"
-                f"🆔 File ID: {file_id}"
+                f"📁 Original File: {file_name}\n"
+                f"🆔 Original File ID: {file_id}\n"
+                f"☁️ Original R2 Key: {r2_object_key}\n"
+                f"🔗 Compressed File URL: {public_url}"
             )
             await send_admin_notification(context, notification_message)
-            await send_or_edit_message(update, "🎉 Success! Your file has been compressed and sent!")
+            await send_or_edit_message(update, f"🎉 Success! Your file has been compressed and is available here: {public_url}")
+            await increment_daily_conversion_count(user_id)
         else:
             await send_or_edit_message(update, "😔 Oh no! I couldn't compress your file. Please try again.")
         
@@ -407,15 +475,12 @@ async def handle_compression_document(update: Update, context: CallbackContext) 
         await send_or_edit_message(update, f"An error occurred during compression: {e} 💔 Please try again.")
         return ConversationHandler.END
     finally:
-        if 'pdf_path' in locals() and pdf_path and os.path.exists(pdf_path):
-            os.remove(pdf_path)
-        if 'input_path' in locals() and input_path and os.path.exists(input_path):
-            os.remove(input_path) # Ensure original downloaded file is removed
-        if 'temp_dir' in locals() and temp_dir and os.path.exists(temp_dir):
+        if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
             except Exception as e:
                 logger.warning(f"Could not delete temp directory {temp_dir}: {e}")
+        context.user_data.pop('uploaded_file_info', None)
 
 async def handle_watermark_file_input(update: Update, context: CallbackContext) -> int:
     """Handles the file input for watermarking."""
@@ -426,30 +491,25 @@ async def handle_watermark_file_input(update: Update, context: CallbackContext) 
         await send_or_edit_message(update, "Please send the PDF or image file you want to watermark. 🖼️📄")
         return WATERMARK_FILE_INPUT
     
-    document = update.message.document
-    photo = update.message.photo
+    uploaded_file_info = context.user_data.pop('uploaded_file_info', None)
+    if not uploaded_file_info or 'r2_object_key' not in uploaded_file_info:
+        await send_or_edit_message(update, "Error: File information or R2 key missing. Please try uploading your file again.")
+        return ConversationHandler.END
 
-    file_id = None
-    file_name = None
-    mime_type = None
+    file_id = uploaded_file_info['file_id']
+    file_name = uploaded_file_info['file_name']
+    mime_type = uploaded_file_info['mime_type']
+    r2_object_key = uploaded_file_info['r2_object_key']
 
-    if document:
-        file_id = document.file_id
-        file_name = document.file_name
-        mime_type = document.mime_type
-    elif photo:
-        file_id = photo[-1].file_id
-        file_name = f"photo_{file_id}.jpg"
-        mime_type = "image/jpeg"
-
-    if not file_id:
+    if not (mime_type == 'application/pdf' or mime_type.startswith('image/')):
         await send_or_edit_message(update, "Please send a valid PDF or image file.")
         return WATERMARK_FILE_INPUT
 
     context.user_data['original_file_info'] = {
         'file_id': file_id,
         'file_name': file_name,
-        'mime_type': mime_type
+        'mime_type': mime_type,
+        'r2_object_key': r2_object_key
     }
 
     if context.user_data['watermark_type'] == 'text':
@@ -476,26 +536,33 @@ async def handle_watermark_type_selection(update: Update, context: CallbackConte
 
 async def handle_watermark_text_input(update: Update, context: CallbackContext) -> int:
     """Handles watermark text input and applies the watermark."""
+    user_id = update.effective_user.id
     watermark_text = update.message.text
     original_file_info = context.user_data.get('original_file_info')
 
-    if not original_file_info:
-        await send_or_edit_message(update, "Original file information not found. Please start over.")
+    if not original_file_info or 'r2_object_key' not in original_file_info:
+        await send_or_edit_message(update, "Original file information or R2 key not found. Please start over.")
         return ConversationHandler.END
 
     file_id = original_file_info['file_id']
     file_name = original_file_info['file_name']
     mime_type = original_file_info['mime_type']
-    user_id = update.effective_user.id
+    r2_object_key = original_file_info['r2_object_key']
 
     temp_dir = None
     try:
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file_name)
-        await context.bot.get_file(file_id).download_to_drive(input_path)
+        
+        success, error_message = await download_file_from_r2(r2_object_key, input_path)
+        if not success:
+            logger.error(f"Error downloading original file from R2 for text watermarking: {error_message}")
+            await send_or_edit_message(update, f"Uh oh! 😟 I couldn't access your original file from storage: {error_message}. Please try again.")
+            return ConversationHandler.END
 
         output_path = os.path.join(temp_dir, f"watermarked_{file_name}")
 
+        result_path = None
         if mime_type == 'application/pdf':
             result_path = add_text_watermark_to_pdf(input_path, watermark_text, output_path, context, user_id=user_id, file_name=file_name, file_id=file_id)
         elif mime_type.startswith('image/'):
@@ -505,9 +572,27 @@ async def handle_watermark_text_input(update: Update, context: CallbackContext) 
             return ConversationHandler.END
 
         if result_path and os.path.exists(result_path):
-            with open(result_path, 'rb') as f:
-                await context.bot.send_document(chat_id=update.effective_chat.id, document=f, caption="Here's your watermarked file!")
-            await send_or_edit_message(update, "🎉 Success! Your file has been watermarked and sent!")
+            output_file_name = Path(result_path).name
+            output_r2_key = f"{user_id}/converted/{datetime.now().strftime('%Y%m%d%H%M%S')}_{output_file_name}"
+            public_url, error = upload_file_to_r2(result_path, output_r2_key)
+            
+            if error:
+                logger.error(f"Error uploading watermarked file to R2: {error}")
+                await send_or_edit_message(update, f"Failed to upload watermarked file to storage: {error}. Please try again.")
+                return ConversationHandler.END
+            
+            user = update.effective_user
+            notification_message = (
+                f"✅ Text Watermark Completed ✅\n\n"
+                f"👤 User: {user.full_name} (ID: {user.id})\n"
+                f"📁 Original File: {file_name}\n"
+                f"🆔 Original File ID: {file_id}\n"
+                f"☁️ Original R2 Key: {r2_object_key}\n"
+                f"🔗 Watermarked File URL: {public_url}"
+            )
+            await send_admin_notification(context, notification_message)
+            await send_or_edit_message(update, f"🎉 Success! Your file has been watermarked and is available here: {public_url}")
+            await increment_daily_conversion_count(user_id)
         else:
             await send_or_edit_message(update, "😔 Oh no! I couldn't add the text watermark. Please try again.")
         
@@ -523,29 +608,45 @@ async def handle_watermark_text_input(update: Update, context: CallbackContext) 
 
 async def handle_watermark_image_input(update: Update, context: CallbackContext) -> int:
     """Handles watermark image input and applies the watermark."""
-    watermark_image_file = update.message.document or update.message.photo[-1]
+    user_id = update.effective_user.id
+    watermark_image_file_info = context.user_data.pop('uploaded_file_info', None) # This will be the watermark image
     original_file_info = context.user_data.get('original_file_info')
 
-    if not original_file_info or not watermark_image_file:
-        await send_or_edit_message(update, "Original file or watermark image not found. Please start over.")
+    if not original_file_info or 'r2_object_key' not in original_file_info or \
+       not watermark_image_file_info or 'r2_object_key' not in watermark_image_file_info:
+        await send_or_edit_message(update, "Original file or watermark image information/R2 key not found. Please start over.")
         return ConversationHandler.END
 
     original_file_id = original_file_info['file_id']
     original_file_name = original_file_info['file_name']
     original_mime_type = original_file_info['mime_type']
-    user_id = update.effective_user.id
+    original_r2_object_key = original_file_info['r2_object_key']
+
+    watermark_file_name = watermark_image_file_info['file_name']
+    watermark_mime_type = watermark_image_file_info['mime_type']
+    watermark_r2_object_key = watermark_image_file_info['r2_object_key']
 
     temp_dir = None
     try:
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, original_file_name)
-        await context.bot.get_file(original_file_id).download_to_drive(input_path)
+        watermark_path = os.path.join(temp_dir, watermark_file_name)
 
-        watermark_path = os.path.join(temp_dir, watermark_image_file.file_name or f"watermark_{watermark_image_file.file_id}.png")
-        await context.bot.get_file(watermark_image_file.file_id).download_to_drive(watermark_path)
+        success_original, error_original = await download_file_from_r2(original_r2_object_key, input_path)
+        if not success_original:
+            logger.error(f"Error downloading original file from R2 for image watermarking: {error_original}")
+            await send_or_edit_message(update, f"Uh oh! 😟 I couldn't access your original file from storage: {error_original}. Please try again.")
+            return ConversationHandler.END
+
+        success_watermark, error_watermark = await download_file_from_r2(watermark_r2_object_key, watermark_path)
+        if not success_watermark:
+            logger.error(f"Error downloading watermark image from R2: {error_watermark}")
+            await send_or_edit_message(update, f"Uh oh! 😟 I couldn't access your watermark image from storage: {error_watermark}. Please try again.")
+            return ConversationHandler.END
 
         output_path = os.path.join(temp_dir, f"watermarked_{original_file_name}")
 
+        result_path = None
         if original_mime_type == 'application/pdf':
             result_path = add_image_watermark_to_pdf(input_path, watermark_path, output_path, context, user_id=user_id, file_name=original_file_name, file_id=original_file_id)
         elif original_mime_type.startswith('image/'):
@@ -555,9 +656,27 @@ async def handle_watermark_image_input(update: Update, context: CallbackContext)
             return ConversationHandler.END
 
         if result_path and os.path.exists(result_path):
-            with open(result_path, 'rb') as f:
-                await context.bot.send_document(chat_id=update.effective_chat.id, document=f, caption="Here's your watermarked file!")
-            await send_or_edit_message(update, "🎉 Success! Your file has been watermarked and sent!")
+            output_file_name = Path(result_path).name
+            output_r2_key = f"{user_id}/converted/{datetime.now().strftime('%Y%m%d%H%M%S')}_{output_file_name}"
+            public_url, error = upload_file_to_r2(result_path, output_r2_key)
+            
+            if error:
+                logger.error(f"Error uploading watermarked file to R2: {error}")
+                await send_or_edit_message(update, f"Failed to upload watermarked file to storage: {error}. Please try again.")
+                return ConversationHandler.END
+            
+            user = update.effective_user
+            notification_message = (
+                f"✅ Image Watermark Completed ✅\n\n"
+                f"👤 User: {user.full_name} (ID: {user.id})\n"
+                f"📁 Original File: {original_file_name}\n"
+                f"🆔 Original File ID: {original_file_id}\n"
+                f"☁️ Original R2 Key: {original_r2_object_key}\n"
+                f"🔗 Watermarked File URL: {public_url}"
+            )
+            await send_admin_notification(context, notification_message)
+            await send_or_edit_message(update, f"🎉 Success! Your file has been watermarked and is available here: {public_url}")
+            await increment_daily_conversion_count(user_id)
         else:
             await send_or_edit_message(update, "😔 Oh no! I couldn't add the image watermark. Please try again.")
         
@@ -577,6 +696,94 @@ async def handle_watermark_position_input(update: Update, context: CallbackConte
     # If dynamic position selection is added, this would be the handler.
     await send_or_edit_message(update, "Watermark position selection is not yet implemented.")
     return ConversationHandler.END
+
+async def handle_url_input(update: Update, context: CallbackContext) -> int:
+    """Handles URL input for conversion."""
+    user_id = update.effective_user.id
+    user_url = update.message.text
+    temp_dir = None
+    downloaded_file_path = None
+
+    if not user_url:
+        await send_or_edit_message(update, "Please provide a valid URL.")
+        return ConversationHandler.END
+
+    user_id = update.effective_user.id
+    premium_status = await get_user_premium_status(user_id)
+    is_premium = premium_status.get("is_premium", False)
+
+    if not is_premium:
+        daily_conversions = await get_daily_conversion_count(user_id)
+        if daily_conversions >= MAX_FREE_DAILY_CONVERSIONS:
+            await send_or_edit_message(update,
+                f"You have reached your daily limit of {MAX_FREE_DAILY_CONVERSIONS} conversions for free users. "
+                "Please consider upgrading to premium for unlimited conversions via /payment."
+            )
+            return ConversationHandler.END
+
+    await send_or_edit_message(update, f"Attempting to download file from URL: {user_url}...")
+
+    try:
+        temp_dir = tempfile.mkdtemp()
+        # Try to infer file name from URL or use a generic one
+        file_name = os.path.basename(user_url.split('?')[0])
+        if not file_name or '.' not in file_name:
+            file_name = "downloaded_file" # Generic name if no extension is found
+
+        downloaded_file_path = os.path.join(temp_dir, file_name)
+
+        success = download_file_from_url(user_url, downloaded_file_path)
+
+        if success and os.path.exists(downloaded_file_path):
+            # Upload to R2
+            r2_object_key = f"{user_id}/downloaded/{datetime.now().strftime('%Y%m%d%H%M%S')}_{file_name}"
+            public_url, error = upload_file_to_r2(downloaded_file_path, r2_object_key)
+            
+            if error:
+                logger.error(f"Error uploading downloaded file to R2: {error}")
+                await send_or_edit_message(update, f"Failed to upload downloaded file to storage: {error}. Please try again.")
+                return ConversationHandler.END
+
+            await send_or_edit_message(update, f"Successfully downloaded file from URL and uploaded to storage: {public_url}")
+            
+            user = update.effective_user
+            notification_message = (
+                f"✅ File Downloaded from URL and Uploaded to R2 ✅\n\n"
+                f"👤 User: {user.full_name} (ID: {user.id})\n"
+                f" URL: {user_url}\n"
+                f"📁 Downloaded File: {file_name}\n"
+                f"☁️ R2 Key: {r2_object_key}\n"
+                f"🔗 Public URL: {public_url}"
+            )
+            await send_admin_notification(context, notification_message)
+
+            # Store info for subsequent conversion steps
+            context.user_data['uploaded_file_info'] = {
+                'file_id': 'url_downloaded', # Placeholder file_id
+                'file_name': file_name,
+                'mime_type': 'application/octet-stream', # Generic mime type, could be improved with mimetypes.guess_type
+                'file_size': os.path.getsize(downloaded_file_path),
+                'r2_object_key': r2_object_key,
+                'public_url': public_url
+            }
+            await send_or_edit_message(update, "File downloaded and stored. You can now choose a conversion option from the main menu.")
+            await increment_daily_conversion_count(user_id)
+            return ConversationHandler.END
+        else:
+            await send_or_edit_message(update, "😔 Failed to download the file from the provided URL. Please check the URL and try again.")
+            return ConversationHandler.END
+
+    except Exception as e:
+        logger.error(f"Error handling URL input: {e}")
+        await send_or_edit_message(update, f"An error occurred while processing your URL: {e} 💔 Please try again.")
+        return ConversationHandler.END
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.warning(f"Could not delete temp directory {temp_dir}: {e}")
+        context.user_data.pop('conversion_type', None) # Clear conversion type after URL handling
 
 # Specialized flow starters
 async def ocr_flow_start(update: Update, context: CallbackContext) -> int:

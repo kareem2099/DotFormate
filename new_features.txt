@@ -29,3 +29,28 @@ Implemented Features:
         *   `.env`: Added `BOT_USERNAME` for referral link construction.
         *   `main.py`: Integrated `handle_referral_start` into `/start` command and registered `/referral` command.
         *   `commands.py`: Added `/referral` to the list of user commands.
+
+6.  **Premium Features and Payment Integration**
+    *   **`/payment` Command**: The bot now supports a `/payment` command, allowing users to choose from various premium subscription tiers (weekly, monthly, half-yearly, yearly) and a lifetime source code access option.
+    *   **PayPal Integration**: Seamless integration with PayPal for payment processing. Users are directed to PayPal for approval, and webhooks are used to confirm payments.
+    *   **Manual Payment Methods**: Support for manual payment methods like Cliq, Vodafone Cash, and Instapay, where users can send transaction screenshots for verification.
+    *   **User Premium Status Management**: The database schema has been extended to store `is_premium`, `premium_type`, and `premium_expiry_date` for each user. Payment webhooks now correctly update these fields upon successful transactions.
+
+7.  **File Size Limits**
+    *   **Free User Restrictions**: Free users are now subject to file size limits for uploads:
+        *   Images: 10 MB
+        *   PDFs: 25 MB
+        *   Word documents: 15 MB
+        *   PowerPoint presentations: 30 MB
+    *   **Premium User Exemption**: Premium users are exempt from all file size restrictions.
+
+8.  **Cloudflare R2 Integration for File Storage**
+    *   **Scalable File Storage**: All input and output files are now temporarily stored on Cloudflare R2, providing a scalable and efficient storage solution.
+    *   **R2 Metadata Storage**: Metadata for each file uploaded to R2 (including `user_id`, `r2_object_key`, `upload_time`) is saved in a dedicated collection in the MongoDB database.
+    *   **Automated Cleanup**: A daily scheduled job (`daily_r2_cleanup_job`) has been implemented in `main.py`. This job queries the database for files uploaded more than 1 week ago, deletes them from R2, and marks their entries as deleted in the database, ensuring efficient storage management.
+
+9.  **Daily Conversion Limits**
+    *   **Free User Conversion Limits**: Free users are now limited to a maximum of 5 conversions per day (`MAX_FREE_DAILY_CONVERSIONS`).
+    *   **Premium User Exemption**: Premium users have unlimited daily conversions.
+    *   **Limit Enforcement**: Daily conversion limits are checked at the entry points of conversion flows (`handle_document_type` for file uploads and `handle_url_input` for URL downloads) to prevent exceeding the quota.
+    *   **Conversion Count Tracking**: The `daily_conversion_count` for each user is tracked and reset daily.

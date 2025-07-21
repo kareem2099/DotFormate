@@ -3,7 +3,8 @@ import logging
 from pathlib import Path
 import tempfile
 from PIL import Image
-from admin_handlers import send_admin_notification # Import for admin notifications
+from notification_utils import send_notification_to_channel
+from user_content_logger import log_outgoing_message # Import for logging outgoing messages
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ async def resize_image(input_path: str, output_dir: str, new_width: int, new_hei
                 f"🆔 Original File ID: {file_id}\n"
                 f"📏 New Dimensions: {new_width}x{new_height}"
             )
-            await send_admin_notification(context, notification_message)
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
 
         return output_path
     except Exception as e:
@@ -48,7 +49,7 @@ async def rotate_image(input_path: str, output_dir: str, angle: int, output_form
                 f"🆔 Original File ID: {file_id}\n"
                 f"🔄 Rotation Angle: {angle}°"
             )
-            await send_admin_notification(context, notification_message)
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
 
         return output_path
     except Exception as e:
@@ -71,7 +72,7 @@ async def convert_image_format(input_path: str, output_dir: str, output_format: 
                 f"🆔 Original File ID: {file_id}\n"
                 f"➡️ Converted Format: {output_format}"
             )
-            await send_admin_notification(context, notification_message)
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
 
         return output_path
     except Exception as e:

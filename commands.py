@@ -2,7 +2,7 @@ from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Upd
 from telegram.ext import CallbackContext
 import os
 import logging
-from admin_handlers import is_admin, handle_admin_users, toggle_maintenance_mode # Import centralized is_admin and admin handlers
+from admin_handlers import is_admin, handle_admin_callbacks, toggle_maintenance_mode # Import centralized is_admin and admin handlers
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ ADMIN_ONLY_COMMANDS = [
     BotCommand("logs", "📝 View system logs"),
     BotCommand("backup", "💾 Create database backup"),
     BotCommand("maintenance", "⚙️ Toggle maintenance mode"),
+    BotCommand("pendingpayments", "💰 Review pending manual payments"), # New admin command
     BotCommand("userswitch", "👥 Switch to user commands")
 ]
 
@@ -67,19 +68,8 @@ async def admin_command_example(update, context):
         # Update commands for this admin user (admin-only commands)
         await set_bot_commands(context.application, update.effective_user.id)
         
-        # Show full admin control panel
-        keyboard = [
-            [InlineKeyboardButton("📊 Bot Statistics", callback_data="admin_stats")],
-            [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")],
-            [InlineKeyboardButton("👥 Show User Commands", callback_data="show_user_commands")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "🛠️ *Admin Control Panel* 🛠️\n\n"
-            "Select an option below:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        # Show full admin control panel using the handle_admin_callbacks function
+        await handle_admin_callbacks(update, context) # This will show the admin panel
     else:
         await update.message.reply_text("You are not authorized to use this command.")
 
@@ -89,7 +79,46 @@ async def handle_users_command(update: Update, context: CallbackContext):
         await update.message.reply_text("⛔ Access denied. Admin privileges required.")
         return
     
-    await handle_admin_users(update, context)
+    # Simulate a callback query to trigger the manage_users function in admin_handlers
+    query = update.callback_query
+    if not query:
+        # Create a dummy query object if the command was sent directly
+        class DummyQuery:
+            def __init__(self, message, from_user, data):
+                self.message = message
+                self.from_user = from_user
+                self.data = data
+            async def answer(self):
+                pass # Dummy answer
+            async def edit_message_text(self, text, reply_markup=None, parse_mode=None):
+                await self.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+
+        query = DummyQuery(update.message, update.effective_user, "admin_manage_users")
+    
+    await handle_admin_callbacks(query, context) # Use the centralized handler
+
+async def handle_pending_payments_command(update: Update, context: CallbackContext):
+    """Admin command to view pending manual payments."""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Access denied. Admin privileges required.")
+        return
+    
+    # Simulate a callback query to trigger the show_pending_payments function in admin_handlers
+    query = update.callback_query
+    if not query:
+        class DummyQuery:
+            def __init__(self, message, from_user, data):
+                self.message = message
+                self.from_user = from_user
+                self.data = data
+            async def answer(self):
+                pass # Dummy answer
+            async def edit_message_text(self, text, reply_markup=None, parse_mode=None, disable_web_page_preview=False):
+                await self.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode, disable_web_page_preview=disable_web_page_preview)
+
+        query = DummyQuery(update.message, update.effective_user, "admin_pending_payments")
+    
+    await handle_admin_callbacks(query, context) # Use the centralized handler
 
 async def handle_logs_command(update: Update, context: CallbackContext):
     """Handle /logs command for viewing system logs."""

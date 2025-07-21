@@ -1,15 +1,11 @@
 import os
 import paypalrestsdk
-from telegram import Update
-from telegram.ext import CallbackContext
-from database import get_user, update_user_data, save_paypal_payment_info
-import os
-import paypalrestsdk
 import logging
 import asyncio # Import asyncio for sleep
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from telegram.error import BadRequest # Import BadRequest
+from database import get_user, update_user_data, save_paypal_payment_info, save_manual_payment_confirmation
 from constants import (
     PAYMENT_SUCCESS, PAYMENT_FAILED, PAYMENT_PENDING,
     PAYMENT_OPTIONS, PAYMENT_METHODS,
@@ -17,12 +13,15 @@ from constants import (
 )
 import tempfile
 import shutil
-from admin_handlers import send_admin_notification
+from notification_utils import send_notification_to_channel # Import for notifications
+from datetime import datetime # Import datetime
+from r2_utils import upload_file_to_r2 # Import upload_file_to_r2
+from utility_handlers import send_or_edit_message # Import send_or_edit_message
 
 logger = logging.getLogger(__name__)
 
 # Configure PayPal SDK
-async def create_paypal_payment(user_id: int, amount: str, description: str):
+async def create_paypal_payment(user_id: int, amount: str, description: str, premium_type: str):
     """
     Creates a PayPal payment and returns the approval URL.
     """
@@ -69,8 +68,8 @@ async def create_paypal_payment(user_id: int, amount: str, description: str):
         logger.info(f"In create_paypal_payment: user_id={user_id}, retrieved user_chat_id={user_chat_id}")
 
         if user_chat_id:
-            await save_paypal_payment_info(user_id, user_chat_id, payment.id)
-            logger.info(f"Saved PayPal payment info for user {user_id} with payment ID {payment.id} and chat ID {user_chat_id}.")
+            await save_paypal_payment_info(user_id, user_chat_id, payment.id, premium_type)
+            logger.info(f"Saved PayPal payment info for user {user_id} with payment ID {payment.id}, chat ID {user_chat_id}, and premium type {premium_type}.")
         else:
             logger.warning(f"Chat ID not found for user {user_id}. Cannot save PayPal payment info with chat_id. User data: {user_data}")
 
@@ -148,7 +147,7 @@ async def handle_payment_option_selection(update: Update, context: CallbackConte
 
     if not selected_option:
         logger.warning(f"Invalid payment option selected by user {query.from_user.id}: {option_key}")
-        await query.edit_message_text("Invalid payment option. Please try again.")
+        await send_or_edit_message(update, "Invalid payment option. Please try again.")
         return MAIN_MENU
 
     context.user_data['selected_payment_option'] = selected_option
@@ -158,22 +157,13 @@ async def handle_payment_option_selection(update: Update, context: CallbackConte
         keyboard.append([InlineKeyboardButton(value, callback_data=f"payment_method_{key}")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    try:
-        await query.edit_message_text(
-            f"You selected: {selected_option['description']} (${selected_option['amount']}).\n"
-            "Please choose your preferred payment method:",
-            reply_markup=reply_markup
-        )
-        logger.info(f"Successfully edited message for payment option selection for user {query.from_user.id}.")
-    except BadRequest as e:
-        logger.error(f"BadRequest when editing message for payment option selection for user {query.from_user.id}: {e}")
-        # If edit fails, send a new message instead of failing silently
-        await query.message.reply_text("An error occurred while updating the message. Please try again.", reply_markup=reply_markup)
-        return SELECT_PAYMENT_METHOD # Stay in the same state to allow re-selection
-    except Exception as e:
-        logger.error(f"Unexpected error when editing message for payment option selection for user {query.from_user.id}: {e}")
-        await query.message.reply_text("An unexpected error occurred. Please try again.", reply_markup=reply_markup)
-        return SELECT_PAYMENT_METHOD # Stay in the same state to allow re-selection
+    await send_or_edit_message(
+        update,
+        f"You selected: {selected_option['description']} (${selected_option['amount']}).\n"
+        "Please choose your preferred payment method:",
+        reply_markup=reply_markup
+    )
+    logger.info(f"Successfully sent/edited message for payment option selection for user {query.from_user.id}.")
     return SELECT_PAYMENT_METHOD
 
 async def handle_payment_method_selection(update: Update, context: CallbackContext):
@@ -190,32 +180,25 @@ async def handle_payment_method_selection(update: Update, context: CallbackConte
 
     if not selected_method or not selected_option:
         logger.warning(f"Invalid payment method or option for user {query.from_user.id}. Method: {method_key}, Option: {selected_option}")
-        await query.edit_message_text("Invalid payment method or option. Please try again.")
+        await send_or_edit_message(update, "Invalid payment method or option. Please try again.")
         return MAIN_MENU
 
     user_id = query.from_user.id
     amount = selected_option['amount']
     description = selected_option['description']
+    premium_type = selected_option['type'] # Assuming 'type' key exists in PAYMENT_OPTIONS
 
     if method_key == "paypal":
-        approval_url = await create_paypal_payment(user_id, amount, description)
+        approval_url = await create_paypal_payment(user_id, amount, description, premium_type)
         if approval_url:
-            try:
-                await query.edit_message_text(
-                    f"Please click the link to complete your PayPal payment: {approval_url}\n"
-                    "After completing the payment, you will be notified here."
-                )
-                logger.info(f"Successfully edited message for PayPal payment link for user {user_id}.")
-            except BadRequest as e:
-                logger.error(f"BadRequest when editing message for PayPal payment link for user {user_id}: {e}")
-                await query.message.reply_text("An error occurred while updating the message. Please try again.")
-                return ConversationHandler.END # End conversation if we can't edit
-            except Exception as e:
-                logger.error(f"Unexpected error when editing message for PayPal payment link for user {user_id}: {e}")
-                await query.message.reply_text("An unexpected error occurred. Please try again.")
-                return ConversationHandler.END # End conversation if we can't edit
+            await send_or_edit_message(
+                update,
+                f"Please click the link to complete your PayPal payment: {approval_url}\n"
+                "After completing the payment, you will be notified here."
+            )
+            logger.info(f"Successfully sent/edited message for PayPal payment link for user {user_id}.")
         else:
-            await query.edit_message_text("Failed to create PayPal payment. Please try again later.")
+            await send_or_edit_message(update, "Failed to create PayPal payment. Please try again later.")
     elif method_key in ["cliq", "vodafone_cash", "instapay"]:
         # For non-PayPal methods, provide instructions
         message = f"To complete your payment of ${amount} for {description} via {selected_method}:\n\n"
@@ -229,20 +212,11 @@ async def handle_payment_method_selection(update: Update, context: CallbackConte
             message += "Please send the amount to our Instapay ID: [fr.mlw@instapay]\n"
             message += "After sending, please reply to this message with a screenshot of the transaction or the transaction ID for verification."
         
-        try:
-            await query.edit_message_text(message)
-            logger.info(f"Successfully edited message for manual payment instructions for user {user_id}.")
-        except BadRequest as e:
-            logger.error(f"BadRequest when editing message for manual payment instructions for user {user_id}: {e}")
-            await query.message.reply_text("An error occurred while updating the message. Please try again.")
-            return ConversationHandler.END # End conversation if we can't edit
-        except Exception as e:
-            logger.error(f"Unexpected error when editing message for manual payment instructions for user {user_id}: {e}")
-            await query.message.reply_text("An unexpected error occurred. Please try again.")
-            return ConversationHandler.END # End conversation if we can't edit
+        await send_or_edit_message(update, message)
+        logger.info(f"Successfully sent/edited message for manual payment instructions for user {user_id}.")
     else:
         logger.warning(f"Unsupported payment method selected by user {user_id}: {method_key}")
-        await query.edit_message_text("Unsupported payment method. Please try again.")
+        await send_or_edit_message(update, "Unsupported payment method. Please try again.")
 
     return ConversationHandler.END # End conversation for now, or transition to a waiting state
 
@@ -332,31 +306,63 @@ async def handle_payment_confirmation_file(update: Update, context: CallbackCont
 
     temp_dir = None
     downloaded_path = None
+    r2_url = None
     try:
         temp_dir = tempfile.mkdtemp()
         downloaded_path = os.path.join(temp_dir, file_name)
         new_file = await context.bot.get_file(file_id)
         await new_file.download_to_drive(downloaded_path)
 
-        user = update.effective_user
-        notification_message = (
-            f"💰 New Payment Confirmation Received 💰\n\n"
-            f"👤 User: {user.full_name} (ID: {user.id})\n"
-            f"📁 File: {file_name}\n"
-            f"🆔 File ID: {file_id}\n"
-            f"MIME Type: {mime_type}\n\n"
-            f"Please review the attached file for payment verification."
-        )
-        await send_admin_notification(context, notification_message, document_path=downloaded_path)
+        # Upload to R2
+        user_id = update.effective_user.id
+        r2_object_key = f"payment_confirmations/{user_id}/{datetime.utcnow().strftime('%Y-%m-%d')}/{file_name}"
+        public_url, error_message = upload_file_to_r2(downloaded_path, r2_object_key)
         
-        await update.message.reply_text(
-            "Thank you! Your payment confirmation has been received. "
-            "We will verify it shortly and update your subscription status. "
-            "You will receive a notification once confirmed. ⏳"
-        )
-        return ConversationHandler.END # End the conversation after receiving confirmation
+        if public_url:
+            r2_url = public_url
+            logger.info(f"Payment confirmation file uploaded to R2: {r2_url}")
+            
+            # Save metadata to database
+            selected_option = context.user_data.get('selected_payment_option')
+            premium_type = selected_option.get('type') if selected_option else None
+            amount = selected_option.get('amount') if selected_option else None
+
+            await save_manual_payment_confirmation(
+                user_id=user_id,
+                file_name=file_name,
+                r2_url=r2_url,
+                upload_time=datetime.utcnow(),
+                status="pending",
+                premium_type=premium_type,
+                amount=amount
+            )
+
+            user = update.effective_user
+            notification_message = (
+                f"💰 New Payment Confirmation Received 💰\n\n"
+                f"👤 User: {user.full_name} (ID: {user.id})\n"
+                f"📁 File: [{file_name}]({r2_url})\n" # Link to R2 file
+                f"🆔 File ID: {file_id}\n"
+                f"MIME Type: {mime_type}\n"
+                f"Premium Type: {premium_type or 'N/A'}\n"
+                f"Amount: ${amount or 'N/A'}\n\n"
+                f"Please review the attached file for payment verification."
+            )
+            await send_notification_to_channel(notification_message, parse_mode='Markdown')
+            logger.info(f"Payment confirmation notification sent for user {user.id}.")
+            
+            await update.message.reply_text(
+                "Thank you! Your payment confirmation has been received. "
+                "We will verify it shortly and update your subscription status. "
+                "You will receive a notification once confirmed. ⏳"
+            )
+            return ConversationHandler.END # End the conversation after receiving confirmation
+        else:
+            logger.error(f"Failed to upload payment confirmation file to R2: {error_message}")
+            await update.message.reply_text(f"Failed to upload your payment confirmation. Error: {error_message} 💔 Please try again.")
+            return SELECT_PAYMENT_METHOD # Stay in payment flow if R2 upload fails
     except Exception as e:
-        logger.error(f"Error handling payment confirmation file: {e}")
+        logger.error(f"Error handling payment confirmation file: {e}", exc_info=True)
         await update.message.reply_text(f"An error occurred while processing your payment confirmation: {e} 💔 Please try again.")
         return ConversationHandler.END
     finally:
