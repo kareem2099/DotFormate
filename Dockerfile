@@ -1,4 +1,4 @@
-FROM python:3.9-slim-buster
+FROM python:3.9-slim-bookworm
 
 RUN apt-get update && apt-get install -y swig tesseract-ocr libleptonica-dev libtesseract-dev && rm -rf /var/lib/apt/lists/*
 
