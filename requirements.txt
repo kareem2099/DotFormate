@@ -4,5 +4,9 @@ pymongo
 python-telegram-bot
 python-http-client
 Flask[async]
+Flask
 python-dotenv
 PyMuPDF
+Pillow
+pytesseract
+pdf2pptx
