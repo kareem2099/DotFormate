@@ -32,14 +32,22 @@ async def create_paypal_payment(user_id: int, amount: str, description: str, pre
         "client_secret": os.getenv("PAYPAL_CLIENT_SECRET")
     })
 
+    # Use environment variables for return and cancel URLs
+    return_url = os.getenv("PAYPAL_RETURN_URL")
+    cancel_url = os.getenv("PAYPAL_CANCEL_URL")
+
+    if not return_url or not cancel_url:
+        logger.error("PAYPAL_RETURN_URL or PAYPAL_CANCEL_URL not set in environment variables.")
+        return None
+
     payment = paypalrestsdk.Payment({
         "intent": "sale",
         "payer": {
             "payment_method": "paypal"
         },
         "redirect_urls": {
-            "return_url": f"https://formate-eta.vercel.app/api/paypal_return?user_id={user_id}",
-            "cancel_url": f"https://formate-eta.vercel.app/api/paypal_cancel?user_id={user_id}"
+            "return_url": f"{return_url}?user_id={user_id}",
+            "cancel_url": f"{cancel_url}?user_id={user_id}"
         },
         "transactions": [{
             "item_list": {

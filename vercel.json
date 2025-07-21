@@ -1,39 +1,5 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "api/test.py",
-      "use": "@vercel/python",
-      "config": { 
-        "maxLambdaSize": "15mb",
-        "runtime": "python3.9"
-      }
-    },
-    {
-      "src": "api/paypal_return.py",
-      "use": "@vercel/python",
-      "config": { 
-        "maxLambdaSize": "15mb",
-        "runtime": "python3.9"
-      }
-    },
-    {
-      "src": "api/paypal_cancel.py",
-      "use": "@vercel/python",
-      "config": { 
-        "maxLambdaSize": "15mb",
-        "runtime": "python3.9"
-      }
-    },
-    {
-      "src": "api/paypal_webhook.py",
-      "use": "@vercel/python",
-      "config": { 
-        "maxLambdaSize": "15mb",
-        "runtime": "python3.9"
-      }
-    }
-  ],
   "routes": [
     {
       "src": "/api/paypal_return",
