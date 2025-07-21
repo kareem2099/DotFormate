@@ -1,7 +1,7 @@
 requests
 paypalrestsdk
 pymongo
-python-telegram-bot
+python-telegram-bot[job-queue]
 python-http-client
 Flask[async]
 Flask
