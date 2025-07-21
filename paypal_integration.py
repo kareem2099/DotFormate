@@ -216,20 +216,17 @@ async def handle_payment_method_selection(update: Update, context: CallbackConte
                 return ConversationHandler.END # End conversation if we can't edit
         else:
             await query.edit_message_text("Failed to create PayPal payment. Please try again later.")
-    elif method_key in ["cliq", "vodafone_cash", "we_pay", "instapay"]:
+    elif method_key in ["cliq", "vodafone_cash", "instapay"]:
         # For non-PayPal methods, provide instructions
         message = f"To complete your payment of ${amount} for {description} via {selected_method}:\n\n"
         if method_key == "cliq":
-            message += "Please send the amount to our Cliq account: [Your Cliq Number/ID]\n"
+            message += "Please send the amount to our Cliq account: [TUQAIB1]\n"
             message += "After sending, please reply to this message with a screenshot of the transaction or the transaction ID for verification."
         elif method_key == "vodafone_cash":
-            message += "Please send the amount to our Vodafone Cash number: [Your Vodafone Cash Number]\n"
-            message += "After sending, please reply to this message with a screenshot of the transaction or the transaction ID for verification."
-        elif method_key == "we_pay":
-            message += "Please send the amount to our We Pay number: [Your We Pay Number]\n"
+            message += "Please send the amount to our Vodafone Cash number: [01022876456]\n"
             message += "After sending, please reply to this message with a screenshot of the transaction or the transaction ID for verification."
         elif method_key == "instapay":
-            message += "Please send the amount to our Instapay ID: [Your Instapay ID]\n"
+            message += "Please send the amount to our Instapay ID: [fr.mlw@instapay]\n"
             message += "After sending, please reply to this message with a screenshot of the transaction or the transaction ID for verification."
         
         try:

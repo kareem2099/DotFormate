@@ -23,6 +23,5 @@ PAYMENT_METHODS = {
     "paypal": "PayPal",
     "cliq": "Cliq (Jordanian Only)",
     "vodafone_cash": "Vodafone Cash (Egyptian Only)",
-    "we_pay": "We Pay (Egyptian Only)",
     "instapay": "Instapay (Egyptian Only)"
 }
