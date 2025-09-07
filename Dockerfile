@@ -1,6 +1,6 @@
 FROM python:3.12-slim-bookworm
 
-RUN apt-get update && apt-get install -y make pkg-config gcc swig tesseract-ocr libleptonica-dev libtesseract-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y make pkg-config gcc g++ swig tesseract-ocr libleptonica-dev libtesseract-dev && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
